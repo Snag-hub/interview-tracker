@@ -1,36 +1,49 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Interview Tracker App
 
-## Getting Started
+Personal candidate SaaS scaffold built with Next.js + TypeScript.
 
-First, run the development server:
+## Quick start
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Current scaffold
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Landing page: `/`
+- Auth pages: `/auth/sign-in`, `/auth/sign-up`
+- Dashboard starter: `/dashboard`
+- Calendar starter: `/calendar`
+- Settings starter: `/settings`
+- Health API: `/api/health`
+- Middleware route protection for app + API routes
 
-## Learn More
+## Planned implementation (next)
 
-To learn more about Next.js, take a look at the following resources:
+- Gmail OAuth (read-only) and manual sync
+- Interview parsing pipeline (ICS + fallback regex)
+- Stripe trial-to-paid subscription gating
+- Replace temporary service-role querying with RLS-safe data access
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## API scaffold available
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `GET|POST /api/applications`
+- `GET|PATCH /api/applications/:id`
+- `PATCH /api/applications/:id/status`
+- `POST /api/applications/:id/rounds`
+- `PATCH /api/rounds/:id`
+- `GET /api/subscription`
 
-## Deploy on Vercel
+Note: these routes now use the authenticated Supabase user from session cookies.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Database schema setup
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Run `supabase/schema.sql` in your Supabase SQL editor to create required tables/types/indexes.
+
+## Related docs
+
+- `../interview_tracker_app_scope_technical_document.md`
+- `../personal_candidate_saas_technical_scope.md`
