@@ -26,6 +26,8 @@ export const createRoundSchema = z.object({
   timezone: z.string().max(80).optional(),
   status: z.enum(roundStatuses).optional(),
   meetingLink: z.string().url().optional(),
+  organizerEmail: z.string().email().optional(),
+  attendeeEmails: z.array(z.string().email()).max(50).optional(),
   notes: z.string().max(2000).optional(),
 });
 

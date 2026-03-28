@@ -65,6 +65,8 @@ export async function PATCH(request: NextRequest, context: Params) {
     if (payload.timezone !== undefined) updates.timezone = payload.timezone;
     if (payload.status !== undefined) updates.status = payload.status;
     if (payload.meetingLink !== undefined) updates.meeting_link = payload.meetingLink;
+    if (payload.organizerEmail !== undefined) updates.organizer_email = payload.organizerEmail;
+    if (payload.attendeeEmails !== undefined) updates.attendee_emails = payload.attendeeEmails;
     if (payload.notes !== undefined) updates.notes = payload.notes;
 
     const { data, error } = await supabase

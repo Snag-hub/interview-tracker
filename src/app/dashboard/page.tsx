@@ -5,6 +5,7 @@ import {
   DashboardApplicationsTable,
   type DashboardApplicationRow,
 } from "@/components/dashboard-applications-table";
+import { DashboardAddInterviewForm } from "@/components/dashboard-add-interview-form";
 
 type ApplicationRow = {
   id: string;
@@ -167,7 +168,7 @@ export default async function DashboardPage() {
             <p className="font-mono text-xs uppercase tracking-[0.2em] text-[var(--accent)]">
               Dashboard
             </p>
-            <h1 className="mt-2 text-2xl font-semibold">Upcoming interview rounds</h1>
+            <h1 className="mt-2 text-2xl font-semibold">Interview tracker overview</h1>
           </div>
           <form action="/api/sync" method="post">
             <button
@@ -178,6 +179,8 @@ export default async function DashboardPage() {
             </button>
           </form>
         </header>
+
+        <DashboardAddInterviewForm />
 
         {dashboardRows.length === 0 ? (
           <p className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-5 text-sm text-black/70">

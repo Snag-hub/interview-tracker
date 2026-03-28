@@ -49,6 +49,8 @@ export async function POST(request: NextRequest, context: Params) {
         timezone: payload.timezone ?? null,
         status: payload.status ?? "Scheduled",
         meeting_link: payload.meetingLink ?? null,
+        organizer_email: payload.organizerEmail ?? null,
+        attendee_emails: payload.attendeeEmails ?? [],
         notes: payload.notes ?? null,
       })
       .select("*")
