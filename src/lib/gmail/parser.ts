@@ -452,11 +452,41 @@ function normalizeCompanyCandidate(value: string | null | undefined): string | n
   return normalized || null;
 }
 
+function isLikelyRoleText(value: string | null): boolean {
+  if (!value) return false;
+  const lowered = value.toLowerCase();
+  const roleTokens = [
+    "engineer",
+    "developer",
+    "architect",
+    "analyst",
+    "consultant",
+    "manager",
+    "lead",
+    "qa",
+    "sdet",
+    "full stack",
+    "fullstack",
+    "backend",
+    "frontend",
+    "technical",
+    "screening",
+    "dot net",
+    ".net",
+    "react",
+    "mvc",
+  ];
+
+  return roleTokens.some((token) => lowered.includes(token));
+}
+
 function isLikelyCompanyName(value: string | null): boolean {
   if (!value) return false;
   const candidate = value.trim();
   if (!candidate || candidate.length < 2 || candidate.length > 80) return false;
+  if (/^[^a-z0-9]+/i.test(candidate)) return false;
   if (/^\d+$/.test(candidate)) return false;
+  if (/^(l\d+|hr|technical|online|f2f|round|interview)$/i.test(candidate)) return false;
   if (/^\.[a-z]+$/i.test(candidate)) return false;
   if (candidate.includes("@") || /https?:\/\//i.test(candidate)) return false;
 
@@ -486,6 +516,7 @@ function isLikelyCompanyName(value: string | null): boolean {
     lowered,
   );
 
+  if (isLikelyRoleText(candidate) && !hasCompanyKeyword) return false;
   if (words.length > 5 && !hasCompanyKeyword) return false;
 
   return true;
@@ -493,6 +524,97 @@ function isLikelyCompanyName(value: string | null): boolean {
 
 function resolveCompanyFallback(organizerEmail: string | null, fromHeader: string): string | null {
   return companyFromEmailAddress(organizerEmail) || fallbackCompanyFromEmail(fromHeader);
+}
+
+function isLikelyPersonName(value: string | null): boolean {
+  if (!value) return false;
+  const candidate = value.trim();
+  if (!candidate) return false;
+
+  if (/(technologies|technology|solutions|systems|labs|software|tech|ltd|limited|llc|inc|corp|group|services|consulting)/i.test(candidate)) {
+    return false;
+  }
+
+  const words = candidate.split(/\s+/).filter(Boolean);
+  if (words.length < 2 || words.length > 4) return false;
+  return words.every((word) => /^[A-Za-z]+$/.test(word));
+}
+
+function isGenericRecruitingCompany(value: string | null): boolean {
+  if (!value) return false;
+  const normalized = value.toLowerCase();
+  return [
+    "smartrecruiters",
+    "greenhouse",
+    "lever",
+    "workday",
+    "myworkdayjobs",
+    "flocareer",
+    "wellfound",
+    "linkedin",
+    "indeed",
+    "naukri",
+    "foundit",
+  ].includes(normalized);
+}
+
+function extractCompanyFromWithMarker(text: string): string | null {
+  const match = text.match(/\bwith\s+([a-z0-9&.' -]{2,80}?)(?=\s*(?:@|\bon\b|,|\(|$))/i);
+  if (!match?.[1]) return null;
+
+  const candidate = normalizeCompanyCandidate(match[1]);
+  if (!isLikelyCompanyName(candidate) || isLikelyPersonName(candidate)) {
+    return null;
+  }
+
+  return candidate;
+}
+
+function extractCompanyFromAtMarker(text: string): string | null {
+  const patterns = [
+    /\bfor\s+.+?\s+at\s+([a-z0-9&.' -]{2,80}?)(?=\s*(?:\.|,|\bwith\b|\bon\b|\(|$))/i,
+    /\bat\s+([a-z0-9&.' -]{2,80}?)(?=\s*(?:\.|,|\bwith\b|\bon\b|\(|$))/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match?.[1]) continue;
+    const candidate = normalizeCompanyCandidate(match[1]);
+    if (!candidate) continue;
+    if (isLikelyCompanyName(candidate) && !isLikelyPersonName(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function extractCompanyFromSlashPrefix(text: string): string | null {
+  if (!text.includes("/")) return null;
+  const prefix = normalizeCompanyCandidate(text.split("/")[0]);
+  if (!prefix) return null;
+  if (!isLikelyCompanyName(prefix) || isLikelyPersonName(prefix)) return null;
+  return prefix;
+}
+
+function extractCompanyFromDashSuffix(text: string): string | null {
+  if (!text.includes("-")) return null;
+
+  const parts = text
+    .split("-")
+    .map((part) => normalizeCompanyCandidate(part))
+    .filter((part): part is string => Boolean(part));
+
+  if (parts.length === 0) return null;
+
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const candidate = parts[index];
+    if (isLikelyCompanyName(candidate) && !isLikelyPersonName(candidate) && !isLikelyRoleText(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
 }
 
 function fallbackCompanyFromSignature(body: string): string | null {
@@ -520,6 +642,7 @@ function extractCompanyAndRole(
   icsSummary: string | null,
 ): { company: string; role: string } {
   const fallbackFromEmail = resolveCompanyFallback(organizerEmail, fromHeader);
+  const organizerCompany = companyFromEmailAddress(organizerEmail);
 
   const finalizeCompany = (candidate: string | null): string => {
     const normalized = normalizeCompanyCandidate(candidate);
@@ -535,19 +658,65 @@ function extractCompanyAndRole(
     .map((part) => pickCandidate(part))
     .filter((part): part is string => Boolean(part));
 
-  const companyFromOrganizer = companyFromEmailAddress(organizerEmail);
-  if (companyFromOrganizer) {
-    const roleFromSummary = pickRoleFromParts(summaryParts);
-    const roleFromSubject = pickCandidate(subject);
+  const roleFromSummary = pickRoleFromParts(summaryParts);
+  const roleFromSubject = pickCandidate(subject);
+
+  const companyFromSlash = extractCompanyFromSlashPrefix(trimmed);
+  if (companyFromSlash) {
     return {
-      company: finalizeCompany(companyFromOrganizer),
+      company: finalizeCompany(companyFromSlash),
+      role: roleFromSummary || roleFromSubject || "Unknown Role",
+    };
+  }
+
+  const companyFromAt = extractCompanyFromAtMarker(trimmed);
+  if (companyFromAt) {
+    return {
+      company: finalizeCompany(companyFromAt),
+      role: roleFromSummary || roleFromSubject || "Unknown Role",
+    };
+  }
+
+  const companyFromDashSuffix = extractCompanyFromDashSuffix(trimmed);
+  if (companyFromDashSuffix) {
+    return {
+      company: finalizeCompany(companyFromDashSuffix),
+      role: roleFromSummary || roleFromSubject || "Unknown Role",
+    };
+  }
+
+  const withMarkerCompany = extractCompanyFromWithMarker(trimmed);
+  if (withMarkerCompany) {
+    return {
+      company: finalizeCompany(withMarkerCompany),
+      role: roleFromSummary || roleFromSubject || "Unknown Role",
+    };
+  }
+
+  if (organizerCompany) {
+    if (isGenericRecruitingCompany(organizerCompany) && summaryParts.length > 0) {
+      const companyFromParts = summaryParts.find(
+        (part) => isLikelyCompanyName(part) && !isLikelyPersonName(part) && !isLikelyRoleText(part),
+      );
+      if (companyFromParts) {
+        return {
+          company: finalizeCompany(companyFromParts),
+          role: roleFromSummary || roleFromSubject || "Unknown Role",
+        };
+      }
+    }
+
+    return {
+      company: finalizeCompany(organizerCompany),
       role: roleFromSummary || roleFromSubject || "Unknown Role",
     };
   }
 
   if (summaryParts.length >= 2) {
-    const companyCandidate = pickCandidate(summaryParts[summaryParts.length - 1]);
-    const roleCandidate = pickRoleFromParts(summaryParts);
+    const companyCandidate = summaryParts.find(
+      (part) => isLikelyCompanyName(part) && !isLikelyPersonName(part) && !isLikelyRoleText(part),
+    );
+    const roleCandidate = roleFromSummary;
 
     if (companyCandidate) {
       return {

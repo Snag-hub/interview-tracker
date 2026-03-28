@@ -1,11 +1,17 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth/session-user";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
+import {
+  DashboardApplicationsTable,
+  type DashboardApplicationRow,
+} from "@/components/dashboard-applications-table";
 
 type ApplicationRow = {
   id: string;
   company: string;
   role: string;
+  application_status: string;
+  current_stage: string;
 };
 
 type RoundRow = {
@@ -14,8 +20,8 @@ type RoundRow = {
   round_type: string;
   status: string;
   scheduled_start_utc: string;
-  organizer_email: string | null;
-  attendee_emails: string[] | null;
+  organizer_email?: string | null;
+  attendee_emails?: string[] | null;
 };
 
 export default async function DashboardPage() {
@@ -27,12 +33,15 @@ export default async function DashboardPage() {
   const supabase = await createSupabaseServerClient();
 
   const [{ data: applications, error: applicationError }, roundsResult] = await Promise.all([
-    supabase.from("job_applications").select("id, company, role").eq("user_id", user.id),
+    supabase
+      .from("job_applications")
+      .select("id, company, role, application_status, current_stage")
+      .eq("user_id", user.id),
     supabase
       .from("interview_rounds")
       .select("id, application_id, round_type, status, scheduled_start_utc, organizer_email, attendee_emails")
-      .order("scheduled_start_utc", { ascending: true })
-      .limit(100),
+      .order("scheduled_start_utc", { ascending: false })
+      .limit(1000),
   ]);
 
   let rounds = roundsResult.data as RoundRow[] | null;
@@ -42,8 +51,8 @@ export default async function DashboardPage() {
     const fallbackRounds = await supabase
       .from("interview_rounds")
       .select("id, application_id, round_type, status, scheduled_start_utc")
-      .order("scheduled_start_utc", { ascending: true })
-      .limit(100);
+      .order("scheduled_start_utc", { ascending: false })
+      .limit(1000);
 
     rounds = (fallbackRounds.data as RoundRow[] | null) ?? [];
     roundsError = fallbackRounds.error;
@@ -53,15 +62,35 @@ export default async function DashboardPage() {
     throw new Error(applicationError?.message ?? roundsError?.message ?? "Failed to load dashboard");
   }
 
-  const applicationMap = new Map<string, ApplicationRow>(
-    (applications as ApplicationRow[]).map((application) => [application.id, application]),
-  );
+  const roundsByApplication = new Map<string, RoundRow[]>();
+  for (const round of rounds ?? []) {
+    const items = roundsByApplication.get(round.application_id) ?? [];
+    items.push(round);
+    roundsByApplication.set(round.application_id, items);
+  }
 
-  const dashboardRows = (rounds ?? []).map((round) => ({
-    ...round,
-    company: applicationMap.get(round.application_id)?.company ?? "Unknown",
-    role: applicationMap.get(round.application_id)?.role ?? "Unknown",
-  }));
+  const dashboardRows: DashboardApplicationRow[] = (applications as ApplicationRow[])
+    .map((application) => {
+      const applicationRounds = roundsByApplication.get(application.id) ?? [];
+      const latestRound = applicationRounds[0] ?? null;
+
+      return {
+        applicationId: application.id,
+        company: application.company,
+        role: application.role,
+        applicationStatus: application.application_status,
+        currentStage: application.current_stage,
+        latestRoundType: latestRound?.round_type ?? null,
+        latestRoundStatus: latestRound?.status ?? null,
+        latestRoundAt: latestRound?.scheduled_start_utc ?? null,
+        totalRounds: applicationRounds.length,
+      };
+    })
+    .sort((left, right) => {
+      const leftTimestamp = left.latestRoundAt ? new Date(left.latestRoundAt).getTime() : 0;
+      const rightTimestamp = right.latestRoundAt ? new Date(right.latestRoundAt).getTime() : 0;
+      return rightTimestamp - leftTimestamp;
+    });
 
   return (
     <main className="shell flex flex-1 justify-center px-6 py-10">
@@ -85,47 +114,10 @@ export default async function DashboardPage() {
 
         {dashboardRows.length === 0 ? (
           <p className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-5 text-sm text-black/70">
-            No interview rounds yet. Create an application and add your first round.
+            No applications yet. Run sync or add an application to get started.
           </p>
         ) : (
-          <div className="mt-6 overflow-hidden rounded-xl border border-[var(--border)]">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-[var(--surface-alt)] font-mono text-xs uppercase tracking-wider text-black/70">
-                <tr>
-                  <th className="px-4 py-3">Company</th>
-                  <th className="px-4 py-3">Role</th>
-                  <th className="px-4 py-3">Round</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Organizer</th>
-                <th className="px-4 py-3">Attendees</th>
-                <th className="px-4 py-3">Date (IST)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dashboardRows.map((round) => (
-                  <tr key={round.id} className="border-t border-[var(--border)]">
-                    <td className="px-4 py-3">{round.company}</td>
-                    <td className="px-4 py-3">{round.role}</td>
-                    <td className="px-4 py-3">{round.round_type}</td>
-                    <td className="px-4 py-3">{round.status}</td>
-                    <td className="px-4 py-3">{round.organizer_email ?? "-"}</td>
-                    <td className="px-4 py-3">{round.attendee_emails?.length ?? 0}</td>
-                    <td className="px-4 py-3">
-                      {new Date(round.scheduled_start_utc).toLocaleString("en-IN", {
-                        timeZone: "Asia/Kolkata",
-                        year: "numeric",
-                        month: "short",
-                        day: "2-digit",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        hour12: true,
-                      })}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DashboardApplicationsTable initialRows={dashboardRows} />
         )}
       </section>
     </main>

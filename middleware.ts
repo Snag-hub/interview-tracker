@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { refreshSupabaseSession } from "@/lib/supabase/middleware-client";
 
-const protectedPagePrefixes = ["/dashboard", "/calendar", "/settings"];
+const protectedPagePrefixes = ["/dashboard", "/calendar", "/settings", "/applications"];
 const protectedApiPrefixes = [
   "/api/applications",
   "/api/rounds",
@@ -44,5 +44,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/calendar/:path*", "/settings/:path*", "/api/:path*", "/auth/:path*"],
+  matcher: ["/dashboard/:path*", "/calendar/:path*", "/settings/:path*", "/applications/:path*", "/api/:path*", "/auth/:path*"],
 };
