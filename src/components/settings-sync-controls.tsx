@@ -23,10 +23,15 @@ function getProgressMessage(elapsedSeconds: number): string {
 }
 
 export function SettingsSyncControls({ hasGmailAccount }: SettingsSyncControlsProps) {
+  const storageKey = "sync.fromDate";
   const [isSyncing, setIsSyncing] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
+  const [fromDate, setFromDate] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return window.localStorage.getItem(storageKey) ?? "";
+  });
 
   const progressMessage = isSyncing ? getProgressMessage(elapsedSeconds) : null;
 
@@ -41,7 +46,15 @@ export function SettingsSyncControls({ hasGmailAccount }: SettingsSyncControlsPr
     }, 1000);
 
     try {
-      const response = await fetch(fullSync ? "/api/sync?full=1" : "/api/sync", {
+      const params = new URLSearchParams();
+      if (fullSync) params.set("full", "1");
+      if (fromDate) {
+        const localMidnightIso = new Date(`${fromDate}T00:00:00`).toISOString();
+        params.set("from", localMidnightIso);
+      }
+      const endpoint = `/api/sync${params.toString() ? `?${params.toString()}` : ""}`;
+
+      const response = await fetch(endpoint, {
         method: "POST",
       });
 
@@ -82,6 +95,29 @@ export function SettingsSyncControls({ hasGmailAccount }: SettingsSyncControlsPr
 
   return (
     <div className="mt-4">
+      <label className="mb-3 block text-sm">
+        <span className="mb-1 block text-black/70">Fetch emails from date</span>
+        <input
+          className="w-full max-w-xs rounded-md border border-[var(--border)] bg-white px-3 py-2"
+          type="date"
+          value={fromDate}
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            setFromDate(nextValue);
+            if (typeof window !== "undefined") {
+              if (nextValue) {
+                window.localStorage.setItem(storageKey, nextValue);
+              } else {
+                window.localStorage.removeItem(storageKey);
+              }
+            }
+          }}
+        />
+        <span className="mt-1 block text-xs text-black/60">
+          Saved locally. Sync fetches emails from this date onward.
+        </span>
+      </label>
+
       <div className="flex flex-wrap gap-2">
         <button
           className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold disabled:opacity-60"

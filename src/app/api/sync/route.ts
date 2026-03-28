@@ -25,14 +25,22 @@ type CachedResolution = {
 };
 
 const SYNC_QUERY =
-  'filename:ics subject:(interview OR meeting OR invitation) -subject:("walk in" OR "walk-in" OR walkin OR drive OR "hiring drive" OR "mega drive" OR "bulk hiring")';
+  '(filename:ics OR "Microsoft Teams" OR "Join with Google Meet" OR "Web Conference") -subject:("walk in" OR "walk-in" OR walkin OR drive OR "hiring drive" OR "mega drive" OR "bulk hiring")';
 const PARSER_RESOLUTIONS_TABLE = "parser_resolutions";
+const conferenceLinkRegex = /(https?:\/\/[\w./?=&%-]*(teams\.microsoft\.com|meet\.google\.com)[\w./?=&%-]*)/i;
 
 function parseHeaderDate(value: string): string | null {
   if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
   return date.toISOString();
+}
+
+function parseFromDate(value: string | null): Date | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
 }
 
 function getHeader(payload: GmailPayload | undefined, name: string) {
@@ -58,6 +66,19 @@ function collectAttachmentParts(payload?: GmailPayload): GmailPayload[] {
   const current = isCalendarPart && hasIcsData ? [payload] : [];
 
   return [...current, ...(payload.parts ?? []).flatMap((part) => collectAttachmentParts(part))];
+}
+
+function hasConferenceSignal(subject: string, body: string, hasIcs: boolean): boolean {
+  if (hasIcs) return true;
+
+  const combined = `${subject}\n${body}`.toLowerCase();
+  const hasConferenceKeyword =
+    combined.includes("microsoft teams") ||
+    combined.includes("join with google meet") ||
+    combined.includes("web conference");
+
+  if (!hasConferenceKeyword) return false;
+  return conferenceLinkRegex.test(`${subject}\n${body}`);
 }
 
 function isMissingInterviewerColumns(message?: string | null) {
@@ -204,9 +225,13 @@ export async function POST(request: Request) {
 
     const url = new URL(request.url);
     const fullSync = url.searchParams.get("full") === "1";
+    const fromDate = parseFromDate(url.searchParams.get("from"));
 
     let query = SYNC_QUERY;
-    if (gmailAccount.last_sync_at && !fullSync) {
+    if (fromDate) {
+      const afterEpoch = Math.floor(fromDate.getTime() / 1000);
+      query = `${query} after:${afterEpoch}`;
+    } else if (gmailAccount.last_sync_at && !fullSync) {
       const afterEpoch = Math.floor(Date.parse(gmailAccount.last_sync_at) / 1000);
       query = `${query} after:${afterEpoch}`;
     }
@@ -283,6 +308,11 @@ export async function POST(request: Request) {
 
       const parsed = parseInvite(subject, body, fromHeader, fallbackDate, icsData);
       parsedCount += 1;
+
+      const conferenceSignal = hasConferenceSignal(subject, body, Boolean(icsData));
+      if (!conferenceSignal) {
+        continue;
+      }
 
       if (geminiEnabled) {
         const signature = buildResolutionSignature(

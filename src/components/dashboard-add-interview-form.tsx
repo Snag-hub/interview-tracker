@@ -16,6 +16,7 @@ function normalize(value: string) {
 }
 
 export function DashboardAddInterviewForm() {
+  const [isOpen, setIsOpen] = useState(false);
   const [company, setCompany] = useState("");
   const [role, setRole] = useState("");
   const [roundType, setRoundType] = useState<(typeof roundTypes)[number]>("HR");
@@ -140,12 +141,24 @@ export function DashboardAddInterviewForm() {
 
   return (
     <article className="mt-6 rounded-xl border border-[var(--border)] p-4">
-      <h2 className="text-lg font-semibold">Add interview manually</h2>
-      <p className="mt-1 text-sm text-black/70">
-        Add company, role, and round details directly when an interview is missing from sync.
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Add interview manually</h2>
+          <p className="mt-1 text-sm text-black/70">
+            Add company, role, and round details directly when an interview is missing from sync.
+          </p>
+        </div>
+        <button
+          className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--accent-strong)]"
+          type="button"
+          onClick={() => setIsOpen((value) => !value)}
+        >
+          {isOpen ? "Hide form" : "Add interview"}
+        </button>
+      </div>
 
-      <form className="mt-3 grid gap-3 md:grid-cols-2" onSubmit={onSubmit}>
+      {isOpen ? (
+        <form className="mt-3 grid gap-3 md:grid-cols-2" onSubmit={onSubmit}>
         <label className="text-sm">
           <span className="mb-1 block text-black/70">Company</span>
           <input
@@ -247,7 +260,8 @@ export function DashboardAddInterviewForm() {
             {saving ? "Saving..." : "Add interview"}
           </button>
         </div>
-      </form>
+        </form>
+      ) : null}
 
       {message ? <p className="mt-3 text-sm text-emerald-700">{message}</p> : null}
       {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
