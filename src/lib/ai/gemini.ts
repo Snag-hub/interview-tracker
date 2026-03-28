@@ -2,6 +2,7 @@ import { getGeminiEnv } from "@/lib/env";
 
 export type GeminiExtractionInput = {
   subject: string;
+  bodySnippet?: string;
   fromHeader: string;
   organizerEmail: string | null;
   icsSummary: string | null;
@@ -60,6 +61,7 @@ export async function extractCompanyRoleWithGemini(
     "- confidence is a number between 0 and 1.",
     "",
     `subject: ${sanitizeText(input.subject)}`,
+    `body_snippet: ${sanitizeText(input.bodySnippet)}`,
     `from_header: ${sanitizeText(input.fromHeader)}`,
     `organizer_email: ${sanitizeText(input.organizerEmail)}`,
     `ics_summary: ${sanitizeText(input.icsSummary)}`,

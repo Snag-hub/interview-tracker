@@ -104,10 +104,16 @@ export function getGeminiEnv() {
 
   const timeoutRaw = process.env.GEMINI_TIMEOUT_MS;
   const timeoutMs = timeoutRaw ? Number.parseInt(timeoutRaw, 10) : 12_000;
+  const maxCallsRaw = process.env.GEMINI_MAX_CALLS_PER_SYNC;
+  const maxCallsPerSync = maxCallsRaw ? Number.parseInt(maxCallsRaw, 10) : 5;
 
   return {
     apiKey: process.env.GEMINI_API_KEY as string,
     model: process.env.GEMINI_MODEL || "gemini-1.5-flash",
     timeoutMs: Number.isNaN(timeoutMs) ? 12_000 : timeoutMs,
+    maxCallsPerSync:
+      Number.isNaN(maxCallsPerSync) || maxCallsPerSync < 1
+        ? 5
+        : Math.min(maxCallsPerSync, 50),
   };
 }

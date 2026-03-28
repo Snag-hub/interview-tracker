@@ -4,7 +4,7 @@ import { serviceUnavailable, unauthorized } from "@/lib/api/responses";
 import { extractCompanyRoleWithGemini } from "@/lib/ai/gemini";
 import { getSessionUser } from "@/lib/auth/session-user";
 import { decryptSecret } from "@/lib/crypto/secrets";
-import { hasEncryptionConfig, hasGeminiConfig, hasGoogleOAuthConfig } from "@/lib/env";
+import { getGeminiEnv, hasEncryptionConfig, hasGeminiConfig, hasGoogleOAuthConfig } from "@/lib/env";
 import { decodeBody, parseIcsContent, parseInvite, type ParsedIcs } from "@/lib/gmail/parser";
 import { createGoogleOAuthClient } from "@/lib/gmail/oauth";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
@@ -18,8 +18,15 @@ type GmailPayload = {
   parts?: Array<GmailPayload>;
 };
 
+type CachedResolution = {
+  company: string;
+  role: string;
+  confidence: number;
+};
+
 const SYNC_QUERY =
   'filename:ics subject:(interview OR meeting OR invitation) -subject:("walk in" OR "walk-in" OR walkin OR drive OR "hiring drive" OR "mega drive" OR "bulk hiring")';
+const PARSER_RESOLUTIONS_TABLE = "parser_resolutions";
 
 function parseHeaderDate(value: string): string | null {
   if (!value) return null;
@@ -58,24 +65,91 @@ function isMissingInterviewerColumns(message?: string | null) {
   return message.includes("organizer_email") || message.includes("attendee_emails");
 }
 
-function parserNeedsAi(company: string, role: string, subject: string): boolean {
-  const normalizedCompany = company.trim().toLowerCase();
-  const normalizedRole = role.trim().toLowerCase();
-  const normalizedSubject = subject.trim().toLowerCase();
+function normalizeExtractionValue(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
 
-  if (!normalizedCompany || !normalizedRole) return true;
-  if (normalizedCompany === "unknown company" || normalizedRole === "unknown role") return true;
-  if (/^(l\d+|hr|technical|online|f2f|round)$/i.test(normalizedCompany)) return true;
-  if (/^\d+$/.test(normalizedCompany)) return true;
-  if (normalizedCompany === normalizedRole) return true;
+function isClearlyInvalidCompany(value: string): boolean {
+  const company = normalizeExtractionValue(value);
+  if (!company) return true;
+  if (company === "unknown company") return true;
+  if (/^(l\d+|hr|technical|online|f2f|round|interview)$/.test(company)) return true;
+  if (/^\d+$/.test(company)) return true;
+  if (/\b(am|pm|gmt|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/.test(company)) return true;
+  if (/^\d{1,2}[./-]\d{1,2}[./-]\d{2,4}$/.test(company)) return true;
+  return false;
+}
 
-  const roleLikeTerms = ["engineer", "developer", "architect", "analyst", "consultant", "manager", "react", "dot net", ".net"];
-  const companyHasOnlyRoleTerms = roleLikeTerms.some((term) => normalizedCompany.includes(term));
-  if (companyHasOnlyRoleTerms && !normalizedSubject.includes(`at ${normalizedCompany}`)) {
+function isClearlyInvalidRole(value: string): boolean {
+  const role = normalizeExtractionValue(value);
+  if (!role) return true;
+  if (role === "unknown role") return true;
+  if (/^\d+$/.test(role)) return true;
+  if (/\b(am|pm|gmt)\b/.test(role)) return true;
+  return false;
+}
+
+function shouldUseAiResult(
+  parserCompany: string,
+  parserRole: string,
+  aiCompany: string,
+  aiRole: string,
+  aiConfidence: number,
+): boolean {
+  const parserCompanyInvalid = isClearlyInvalidCompany(parserCompany);
+  const parserRoleInvalid = isClearlyInvalidRole(parserRole);
+  const aiCompanyInvalid = isClearlyInvalidCompany(aiCompany);
+  const aiRoleInvalid = isClearlyInvalidRole(aiRole);
+
+  if (aiCompanyInvalid || aiRoleInvalid) return false;
+  if ((parserCompanyInvalid || parserRoleInvalid) && !(aiCompanyInvalid || aiRoleInvalid)) {
     return true;
   }
 
-  return false;
+  const sameCompany = normalizeExtractionValue(parserCompany) === normalizeExtractionValue(aiCompany);
+  const sameRole = normalizeExtractionValue(parserRole) === normalizeExtractionValue(aiRole);
+
+  if (sameCompany && sameRole) return false;
+  return aiConfidence >= 0.75;
+}
+
+function isMissingParserResolutionsTable(message?: string | null): boolean {
+  if (!message) return false;
+  const normalized = message.toLowerCase();
+  return normalized.includes(PARSER_RESOLUTIONS_TABLE) || normalized.includes("does not exist");
+}
+
+function getDomainFromHeader(fromHeader: string): string {
+  return fromHeader.match(/@([a-z0-9.-]+\.[a-z]{2,})/i)?.[1]?.toLowerCase() ?? "";
+}
+
+function normalizeForSignature(value: string | null | undefined): string {
+  if (!value) return "";
+  return value
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/g, " ")
+    .replace(/\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/g, " #date ")
+    .replace(/\b\d+\b/g, " # ")
+    .replace(/[^a-z0-9# ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildResolutionSignature(
+  subject: string,
+  fromHeader: string,
+  organizerEmail: string | null,
+  icsSummary: string | null,
+): string {
+  const parts = [
+    normalizeForSignature(subject),
+    normalizeForSignature(icsSummary),
+    normalizeForSignature(organizerEmail),
+    normalizeForSignature(getDomainFromHeader(fromHeader)),
+  ].filter(Boolean);
+
+  return parts.join("|").slice(0, 400);
 }
 
 export async function POST(request: Request) {
@@ -112,6 +186,11 @@ export async function POST(request: Request) {
   let createdCount = 0;
   let updatedCount = 0;
   let failedCount = 0;
+  const geminiEnabled = hasGeminiConfig();
+  const geminiEnv = geminiEnabled ? getGeminiEnv() : null;
+  let geminiCallsUsed = 0;
+  let parserResolutionTableAvailable = true;
+  const resolutionCache = new Map<string, CachedResolution | null>();
 
   try {
     const oauthClient = createGoogleOAuthClient();
@@ -205,17 +284,90 @@ export async function POST(request: Request) {
       const parsed = parseInvite(subject, body, fromHeader, fallbackDate, icsData);
       parsedCount += 1;
 
-      if (hasGeminiConfig() && parserNeedsAi(parsed.company, parsed.role, subject)) {
-        const aiResult = await extractCompanyRoleWithGemini({
+      if (geminiEnabled) {
+        const signature = buildResolutionSignature(
           subject,
           fromHeader,
-          organizerEmail: icsData?.organizerEmail ?? null,
-          icsSummary: icsData?.summary ?? null,
-          icsLocation: icsData?.location ?? null,
-          icsStatus: icsData?.status ?? null,
-        });
+          icsData?.organizerEmail ?? null,
+          icsData?.summary ?? null,
+        );
 
-        if (aiResult && aiResult.confidence >= 0.72) {
+        let aiResult: CachedResolution | null | undefined = resolutionCache.get(signature);
+
+        if (aiResult === undefined) {
+          aiResult = null;
+
+          if (parserResolutionTableAvailable) {
+            const storedResolutionResult = await supabase
+              .from(PARSER_RESOLUTIONS_TABLE)
+              .select("company, role, confidence")
+              .eq("user_id", user.id)
+              .eq("signature", signature)
+              .maybeSingle();
+
+            if (storedResolutionResult.error) {
+              if (isMissingParserResolutionsTable(storedResolutionResult.error.message)) {
+                parserResolutionTableAvailable = false;
+              }
+            } else if (storedResolutionResult.data) {
+              aiResult = {
+                company: storedResolutionResult.data.company,
+                role: storedResolutionResult.data.role,
+                confidence: Number(storedResolutionResult.data.confidence ?? 0),
+              };
+            }
+          }
+
+          const maxCalls = geminiEnv?.maxCallsPerSync ?? 5;
+          if (!aiResult && geminiCallsUsed < maxCalls) {
+            geminiCallsUsed += 1;
+
+            const extracted = await extractCompanyRoleWithGemini({
+              subject,
+              bodySnippet: body.slice(0, 700),
+              fromHeader,
+              organizerEmail: icsData?.organizerEmail ?? null,
+              icsSummary: icsData?.summary ?? null,
+              icsLocation: icsData?.location ?? null,
+              icsStatus: icsData?.status ?? null,
+            });
+
+            if (extracted) {
+              aiResult = {
+                company: extracted.company,
+                role: extracted.role,
+                confidence: extracted.confidence,
+              };
+
+              if (parserResolutionTableAvailable) {
+                const upsertResolutionResult = await supabase.from(PARSER_RESOLUTIONS_TABLE).upsert(
+                  {
+                    user_id: user.id,
+                    signature,
+                    company: extracted.company,
+                    role: extracted.role,
+                    confidence: extracted.confidence,
+                    source: "gemini",
+                    last_used_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                  },
+                  { onConflict: "user_id,signature" },
+                );
+
+                if (upsertResolutionResult.error && isMissingParserResolutionsTable(upsertResolutionResult.error.message)) {
+                  parserResolutionTableAvailable = false;
+                }
+              }
+            }
+          }
+
+          resolutionCache.set(signature, aiResult);
+        }
+
+        if (
+          aiResult &&
+          shouldUseAiResult(parsed.company, parsed.role, aiResult.company, aiResult.role, aiResult.confidence)
+        ) {
           parsed.company = aiResult.company;
           parsed.role = aiResult.role;
         }
@@ -352,6 +504,7 @@ export async function POST(request: Request) {
       createdCount,
       updatedCount,
       failedCount,
+      aiCallsUsed: geminiCallsUsed,
     };
 
     const contentType = request.headers.get("content-type") ?? "";

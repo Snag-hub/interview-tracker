@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { SettingsSyncControls } from "@/components/settings-sync-controls";
 import { getSessionUser } from "@/lib/auth/session-user";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 
@@ -102,23 +103,8 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               >
                 {gmailAccount ? "Reconnect Gmail" : "Connect Gmail"}
               </a>
-              <form action="/api/sync" method="post">
-                <button
-                  className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold"
-                  type="submit"
-                >
-                  Sync now
-                </button>
-              </form>
-              <form action="/api/sync?full=1" method="post">
-                <button
-                  className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold"
-                  type="submit"
-                >
-                  Full sync
-                </button>
-              </form>
             </div>
+            <SettingsSyncControls hasGmailAccount={Boolean(gmailAccount)} />
           </article>
 
           <article className="rounded-xl border border-[var(--border)] p-4">

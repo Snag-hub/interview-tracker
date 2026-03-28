@@ -111,6 +111,20 @@ create table if not exists public.sync_runs (
   error_summary text
 );
 
+create table if not exists public.parser_resolutions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  signature text not null,
+  company text not null,
+  role text not null,
+  confidence numeric(5,4) not null default 0,
+  source text not null default 'gemini',
+  last_used_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, signature)
+);
+
 create index if not exists idx_interview_rounds_application_start
   on public.interview_rounds(application_id, scheduled_start_utc);
 
@@ -122,3 +136,6 @@ create index if not exists idx_job_applications_user_updated
 
 create index if not exists idx_subscriptions_user_id
   on public.subscriptions(user_id);
+
+create index if not exists idx_parser_resolutions_user_used
+  on public.parser_resolutions(user_id, last_used_at desc);
