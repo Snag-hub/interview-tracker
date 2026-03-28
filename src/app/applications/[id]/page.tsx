@@ -9,15 +9,17 @@ import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 
 type ApplicationPageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ related?: string }>;
 };
 
-export default async function ApplicationProgressPage({ params }: ApplicationPageProps) {
+export default async function ApplicationProgressPage({ params, searchParams }: ApplicationPageProps) {
   const user = await getSessionUser();
   if (!user) {
     redirect("/auth/sign-in");
   }
 
   const { id } = await params;
+  const query = await searchParams;
   const supabase = await createSupabaseServerClient();
 
   const { data: applicationData, error: applicationError } = await supabase
@@ -35,19 +37,39 @@ export default async function ApplicationProgressPage({ params }: ApplicationPag
     notFound();
   }
 
+  const relatedIds = (query.related ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const mergedApplicationIds = [...new Set([id, ...relatedIds])];
+
+  const relatedApplicationsResult = await supabase
+    .from("job_applications")
+    .select("id")
+    .in("id", mergedApplicationIds)
+    .eq("user_id", user.id);
+
+  if (relatedApplicationsResult.error) {
+    throw new Error(relatedApplicationsResult.error.message);
+  }
+
+  const permittedIds = (relatedApplicationsResult.data ?? []).map((row) => row.id);
+  const applicationIdsToQuery = permittedIds.length > 0 ? permittedIds : [id];
+
   const roundsResult = await supabase
     .from("interview_rounds")
     .select(
       "id, round_type, status, scheduled_start_utc, scheduled_end_utc, timezone, meeting_link, organizer_email, attendee_emails, notes",
     )
-    .eq("application_id", id)
+    .in("application_id", applicationIdsToQuery)
     .order("scheduled_start_utc", { ascending: true });
 
   if (roundsResult.error?.message?.includes("organizer_email") || roundsResult.error?.message?.includes("attendee_emails")) {
     const fallbackRounds = await supabase
       .from("interview_rounds")
       .select("id, round_type, status, scheduled_start_utc, scheduled_end_utc, timezone, meeting_link, notes")
-      .eq("application_id", id)
+      .in("application_id", applicationIdsToQuery)
       .order("scheduled_start_utc", { ascending: true });
 
     if (fallbackRounds.error) {
@@ -76,7 +98,7 @@ export default async function ApplicationProgressPage({ params }: ApplicationPag
       notes: row.notes,
     }));
 
-    return <ApplicationProgressPanel application={application} rounds={rounds} />;
+    return <ApplicationProgressPanel application={application} applicationIds={applicationIdsToQuery} rounds={rounds} />;
   }
 
   if (roundsResult.error) {
@@ -105,5 +127,5 @@ export default async function ApplicationProgressPage({ params }: ApplicationPag
     notes: row.notes,
   }));
 
-  return <ApplicationProgressPanel application={application} rounds={rounds} />;
+  return <ApplicationProgressPanel application={application} applicationIds={applicationIdsToQuery} rounds={rounds} />;
 }

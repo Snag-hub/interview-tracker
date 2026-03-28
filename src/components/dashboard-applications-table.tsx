@@ -5,6 +5,7 @@ import { useState } from "react";
 
 export type DashboardApplicationRow = {
   applicationId: string;
+  relatedApplicationIds: string[];
   company: string;
   role: string;
   applicationStatus: string;
@@ -69,17 +70,22 @@ export function DashboardApplicationsTable({ initialRows }: DashboardApplication
     setErrorMessage(null);
 
     try {
-      const response = await fetch(`/api/applications/${editingApplicationId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ company, role }),
-      });
+      const targetIds =
+        rows.find((row) => row.applicationId === editingApplicationId)?.relatedApplicationIds ?? [editingApplicationId];
 
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(payload?.error || "Failed to update application");
+      for (const applicationId of targetIds) {
+        const response = await fetch(`/api/applications/${applicationId}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ company, role }),
+        });
+
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(payload?.error || "Failed to update application");
+        }
       }
 
       setRows((currentRows) =>
@@ -179,7 +185,7 @@ export function DashboardApplicationsTable({ initialRows }: DashboardApplication
                           Edit
                         </button>
                         <Link
-                          href={`/applications/${row.applicationId}`}
+                          href={`/applications/${row.applicationId}?related=${encodeURIComponent(row.relatedApplicationIds.join(","))}`}
                           className="rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold"
                         >
                           View Progress

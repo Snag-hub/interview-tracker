@@ -24,6 +24,44 @@ type RoundRow = {
   attendee_emails?: string[] | null;
 };
 
+function normalizeCompanyForGrouping(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+}
+
+function normalizeRoleForGrouping(value: string) {
+  const lowered = value.toLowerCase();
+  const canonicalTokens = [
+    "full stack",
+    "fullstack",
+    ".net",
+    "dot net",
+    "react",
+    "backend",
+    "frontend",
+    "developer",
+    "engineer",
+    "architect",
+    "analyst",
+    "manager",
+    "qa",
+    "sdet",
+    "software",
+  ];
+
+  const picked = canonicalTokens.filter((token) => lowered.includes(token));
+  if (picked.length > 0) {
+    return picked.join(" ");
+  }
+
+  return lowered
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .slice(0, 6)
+    .join(" ");
+}
+
 export default async function DashboardPage() {
   const user = await getSessionUser();
   if (!user) {
@@ -69,13 +107,20 @@ export default async function DashboardPage() {
     roundsByApplication.set(round.application_id, items);
   }
 
-  const dashboardRows: DashboardApplicationRow[] = (applications as ApplicationRow[])
-    .map((application) => {
-      const applicationRounds = roundsByApplication.get(application.id) ?? [];
-      const latestRound = applicationRounds[0] ?? null;
+  const grouped = new Map<string, DashboardApplicationRow>();
 
-      return {
+  for (const application of applications as ApplicationRow[]) {
+    const companyKey = normalizeCompanyForGrouping(application.company);
+    const roleKey = normalizeRoleForGrouping(application.role);
+    const groupKey = `${companyKey}|${roleKey}`;
+    const applicationRounds = roundsByApplication.get(application.id) ?? [];
+    const latestRound = applicationRounds[0] ?? null;
+
+    const existing = grouped.get(groupKey);
+    if (!existing) {
+      grouped.set(groupKey, {
         applicationId: application.id,
+        relatedApplicationIds: [application.id],
         company: application.company,
         role: application.role,
         applicationStatus: application.application_status,
@@ -84,13 +129,35 @@ export default async function DashboardPage() {
         latestRoundStatus: latestRound?.status ?? null,
         latestRoundAt: latestRound?.scheduled_start_utc ?? null,
         totalRounds: applicationRounds.length,
-      };
-    })
-    .sort((left, right) => {
-      const leftTimestamp = left.latestRoundAt ? new Date(left.latestRoundAt).getTime() : 0;
-      const rightTimestamp = right.latestRoundAt ? new Date(right.latestRoundAt).getTime() : 0;
-      return rightTimestamp - leftTimestamp;
-    });
+      });
+      continue;
+    }
+
+    existing.relatedApplicationIds.push(application.id);
+    existing.totalRounds += applicationRounds.length;
+
+    const existingLatest = existing.latestRoundAt ? new Date(existing.latestRoundAt).getTime() : 0;
+    const incomingLatest = latestRound?.scheduled_start_utc
+      ? new Date(latestRound.scheduled_start_utc).getTime()
+      : 0;
+
+    if (incomingLatest > existingLatest) {
+      existing.applicationId = application.id;
+      existing.company = application.company;
+      existing.role = application.role;
+      existing.applicationStatus = application.application_status;
+      existing.currentStage = application.current_stage;
+      existing.latestRoundType = latestRound?.round_type ?? null;
+      existing.latestRoundStatus = latestRound?.status ?? null;
+      existing.latestRoundAt = latestRound?.scheduled_start_utc ?? null;
+    }
+  }
+
+  const dashboardRows: DashboardApplicationRow[] = [...grouped.values()].sort((left, right) => {
+    const leftTimestamp = left.latestRoundAt ? new Date(left.latestRoundAt).getTime() : 0;
+    const rightTimestamp = right.latestRoundAt ? new Date(right.latestRoundAt).getTime() : 0;
+    return rightTimestamp - leftTimestamp;
+  });
 
   return (
     <main className="shell flex flex-1 justify-center px-6 py-10">

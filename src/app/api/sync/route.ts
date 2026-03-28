@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { google } from "googleapis";
 import { serviceUnavailable, unauthorized } from "@/lib/api/responses";
+import { extractCompanyRoleWithGemini } from "@/lib/ai/gemini";
 import { getSessionUser } from "@/lib/auth/session-user";
 import { decryptSecret } from "@/lib/crypto/secrets";
-import { hasEncryptionConfig, hasGoogleOAuthConfig } from "@/lib/env";
+import { hasEncryptionConfig, hasGeminiConfig, hasGoogleOAuthConfig } from "@/lib/env";
 import { decodeBody, parseIcsContent, parseInvite, type ParsedIcs } from "@/lib/gmail/parser";
 import { createGoogleOAuthClient } from "@/lib/gmail/oauth";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
@@ -55,6 +56,26 @@ function collectAttachmentParts(payload?: GmailPayload): GmailPayload[] {
 function isMissingInterviewerColumns(message?: string | null) {
   if (!message) return false;
   return message.includes("organizer_email") || message.includes("attendee_emails");
+}
+
+function parserNeedsAi(company: string, role: string, subject: string): boolean {
+  const normalizedCompany = company.trim().toLowerCase();
+  const normalizedRole = role.trim().toLowerCase();
+  const normalizedSubject = subject.trim().toLowerCase();
+
+  if (!normalizedCompany || !normalizedRole) return true;
+  if (normalizedCompany === "unknown company" || normalizedRole === "unknown role") return true;
+  if (/^(l\d+|hr|technical|online|f2f|round)$/i.test(normalizedCompany)) return true;
+  if (/^\d+$/.test(normalizedCompany)) return true;
+  if (normalizedCompany === normalizedRole) return true;
+
+  const roleLikeTerms = ["engineer", "developer", "architect", "analyst", "consultant", "manager", "react", "dot net", ".net"];
+  const companyHasOnlyRoleTerms = roleLikeTerms.some((term) => normalizedCompany.includes(term));
+  if (companyHasOnlyRoleTerms && !normalizedSubject.includes(`at ${normalizedCompany}`)) {
+    return true;
+  }
+
+  return false;
 }
 
 export async function POST(request: Request) {
@@ -183,6 +204,22 @@ export async function POST(request: Request) {
 
       const parsed = parseInvite(subject, body, fromHeader, fallbackDate, icsData);
       parsedCount += 1;
+
+      if (hasGeminiConfig() && parserNeedsAi(parsed.company, parsed.role, subject)) {
+        const aiResult = await extractCompanyRoleWithGemini({
+          subject,
+          fromHeader,
+          organizerEmail: icsData?.organizerEmail ?? null,
+          icsSummary: icsData?.summary ?? null,
+          icsLocation: icsData?.location ?? null,
+          icsStatus: icsData?.status ?? null,
+        });
+
+        if (aiResult && aiResult.confidence >= 0.72) {
+          parsed.company = aiResult.company;
+          parsed.role = aiResult.role;
+        }
+      }
 
       const scheduledDate = new Date(parsed.scheduledAt);
       const invalidDate = Number.isNaN(scheduledDate.getTime()) || scheduledDate.getUTCFullYear() < 2000;

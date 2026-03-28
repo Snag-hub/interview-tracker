@@ -28,6 +28,7 @@ export type ProgressRound = {
 
 type ApplicationProgressPanelProps = {
   application: ApplicationProgress;
+  applicationIds: string[];
   rounds: ProgressRound[];
 };
 
@@ -43,7 +44,7 @@ function formatDate(value: string) {
   });
 }
 
-export function ApplicationProgressPanel({ application, rounds }: ApplicationProgressPanelProps) {
+export function ApplicationProgressPanel({ application, applicationIds, rounds }: ApplicationProgressPanelProps) {
   const [company, setCompany] = useState(application.company);
   const [role, setRole] = useState(application.role);
   const [applicationStatus, setApplicationStatus] = useState(application.applicationStatus);
@@ -72,23 +73,25 @@ export function ApplicationProgressPanel({ application, rounds }: ApplicationPro
     setApplicationMessage(null);
 
     try {
-      const response = await fetch(`/api/applications/${application.id}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          company: company.trim(),
-          role: role.trim(),
-          applicationStatus,
-          currentStage,
-          notes: applicationNotes.trim() || null,
-        }),
-      });
+      for (const applicationId of applicationIds) {
+        const response = await fetch(`/api/applications/${applicationId}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            company: company.trim(),
+            role: role.trim(),
+            applicationStatus,
+            currentStage,
+            notes: applicationNotes.trim() || null,
+          }),
+        });
 
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(payload?.error || "Failed to update application");
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(payload?.error || "Failed to update application");
+        }
       }
 
       setApplicationMessage("Application updated.");

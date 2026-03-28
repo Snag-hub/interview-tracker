@@ -85,3 +85,29 @@ export function getEncryptionKey(): string {
 
   return process.env.APP_ENCRYPTION_KEY;
 }
+
+export function hasGeminiConfig(): boolean {
+  const enabled = (process.env.GEMINI_ENABLED ?? "true").toLowerCase() !== "false";
+  return enabled && Boolean(process.env.GEMINI_API_KEY);
+}
+
+export function getGeminiEnv() {
+  const missing: string[] = [];
+
+  if (!process.env.GEMINI_API_KEY) {
+    missing.push("GEMINI_API_KEY");
+  }
+
+  if (missing.length > 0) {
+    throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
+  }
+
+  const timeoutRaw = process.env.GEMINI_TIMEOUT_MS;
+  const timeoutMs = timeoutRaw ? Number.parseInt(timeoutRaw, 10) : 12_000;
+
+  return {
+    apiKey: process.env.GEMINI_API_KEY as string,
+    model: process.env.GEMINI_MODEL || "gemini-1.5-flash",
+    timeoutMs: Number.isNaN(timeoutMs) ? 12_000 : timeoutMs,
+  };
+}
