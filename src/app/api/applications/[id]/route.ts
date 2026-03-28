@@ -4,7 +4,7 @@ import { notFound, badRequest, serviceUnavailable, unauthorized } from "@/lib/ap
 import { updateApplicationSchema } from "@/lib/api/application-schemas";
 import { hasSupabaseConfig } from "@/lib/env";
 import { getSessionUser } from "@/lib/auth/session-user";
-import { createAdminClient } from "@/lib/supabase/admin-client";
+import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 
 function mapApplication(row: Record<string, unknown>) {
   return {
@@ -35,7 +35,7 @@ export async function GET(_: NextRequest, context: Params) {
   }
 
   const { id } = await context.params;
-  const supabase = createAdminClient();
+  const supabase = await createSupabaseServerClient();
 
   const { data, error } = await supabase
     .from("job_applications")
@@ -69,7 +69,7 @@ export async function PATCH(request: NextRequest, context: Params) {
 
   try {
     const payload = updateApplicationSchema.parse(await request.json());
-    const supabase = createAdminClient();
+    const supabase = await createSupabaseServerClient();
 
     const updates: Record<string, unknown> = {
       updated_at: new Date().toISOString(),

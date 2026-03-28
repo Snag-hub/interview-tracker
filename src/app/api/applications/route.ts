@@ -4,7 +4,7 @@ import { createApplicationSchema } from "@/lib/api/application-schemas";
 import { badRequest, serviceUnavailable, unauthorized } from "@/lib/api/responses";
 import { hasSupabaseConfig } from "@/lib/env";
 import { getSessionUser } from "@/lib/auth/session-user";
-import { createAdminClient } from "@/lib/supabase/admin-client";
+import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 
 function mapApplication(row: Record<string, unknown>) {
   return {
@@ -32,7 +32,7 @@ export async function GET() {
     return unauthorized();
   }
 
-  const supabase = createAdminClient();
+  const supabase = await createSupabaseServerClient();
 
   const { data, error } = await supabase
     .from("job_applications")
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const payload = createApplicationSchema.parse(await request.json());
-    const supabase = createAdminClient();
+    const supabase = await createSupabaseServerClient();
 
     const { data, error } = await supabase
       .from("job_applications")

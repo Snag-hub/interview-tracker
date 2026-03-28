@@ -2,7 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { refreshSupabaseSession } from "@/lib/supabase/middleware-client";
 
 const protectedPagePrefixes = ["/dashboard", "/calendar", "/settings"];
-const protectedApiPrefixes = ["/api/applications", "/api/rounds", "/api/subscription"];
+const protectedApiPrefixes = [
+  "/api/applications",
+  "/api/rounds",
+  "/api/subscription",
+  "/api/gmail",
+  "/api/sync",
+];
 
 function isProtectedPage(pathname: string) {
   return protectedPagePrefixes.some(

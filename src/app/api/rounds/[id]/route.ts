@@ -4,7 +4,7 @@ import { badRequest, notFound, serviceUnavailable, unauthorized } from "@/lib/ap
 import { updateRoundSchema } from "@/lib/api/application-schemas";
 import { hasSupabaseConfig } from "@/lib/env";
 import { getSessionUser } from "@/lib/auth/session-user";
-import { createAdminClient } from "@/lib/supabase/admin-client";
+import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -22,7 +22,7 @@ export async function PATCH(request: NextRequest, context: Params) {
 
   try {
     const payload = updateRoundSchema.parse(await request.json());
-    const supabase = createAdminClient();
+    const supabase = await createSupabaseServerClient();
 
     const { data: round, error: roundError } = await supabase
       .from("interview_rounds")
@@ -93,6 +93,8 @@ export async function PATCH(request: NextRequest, context: Params) {
           timezone: data.timezone,
           status: data.status,
           meetingLink: data.meeting_link,
+          organizerEmail: data.organizer_email,
+          attendeeEmails: data.attendee_emails,
           notes: data.notes,
           createdAt: data.created_at,
           updatedAt: data.updated_at,

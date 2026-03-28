@@ -88,6 +88,8 @@ create table if not exists public.interview_rounds (
   timezone text,
   status round_status not null default 'Scheduled',
   meeting_link text,
+  organizer_email text,
+  attendee_emails text[] not null default '{}',
   source_email_id text,
   source_thread_id text,
   notes text,

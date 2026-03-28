@@ -23,10 +23,9 @@ Open `http://localhost:3000`.
 
 ## Planned implementation (next)
 
-- Gmail OAuth (read-only) and manual sync
-- Interview parsing pipeline (ICS + fallback regex)
+- Improve sync parser quality (ICS parsing + smarter company/role extraction)
 - Stripe trial-to-paid subscription gating
-- Replace temporary service-role querying with RLS-safe data access
+- Dashboard calendar wiring and CRUD UI forms
 
 ## API scaffold available
 
@@ -36,12 +35,27 @@ Open `http://localhost:3000`.
 - `POST /api/applications/:id/rounds`
 - `PATCH /api/rounds/:id`
 - `GET /api/subscription`
+- `GET|POST /api/gmail/connect`
+- `GET /api/gmail/callback`
+- `POST /api/sync`
 
 Note: these routes now use the authenticated Supabase user from session cookies.
 
+## Gmail setup notes
+
+- Configure Google OAuth credentials with redirect URI: `http://localhost:3000/api/gmail/callback`
+- Add `APP_ENCRYPTION_KEY` in `.env` for token encryption at rest
+- Use `/settings` to connect Gmail and trigger manual sync
+
 ## Database schema setup
 
-Run `supabase/schema.sql` in your Supabase SQL editor to create required tables/types/indexes.
+Run these scripts in your Supabase SQL editor:
+
+1. `supabase/schema.sql`
+2. `supabase/rls.sql`
+3. `supabase/add_interviewer_metadata.sql` (if your tables already exist)
+
+`rls.sql` enables row-level security policies, updated_at triggers, and trial subscription bootstrap on auth signup.
 
 ## Related docs
 

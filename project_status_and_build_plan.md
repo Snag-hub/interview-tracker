@@ -38,7 +38,14 @@
   - core APIs (`/api/applications*`, `/api/rounds*`, `/api/subscription`)
 - API routes now resolve authenticated session user instead of `DEV_USER_ID`
 
-### 5) API Scaffold (Implemented)
+### 5) RLS and Security Baseline (Completed)
+- Added RLS policy script: `supabase/rls.sql`
+- Added ownership policies for subscriptions, gmail_accounts, applications, rounds, resume_versions, and sync_runs
+- Added `updated_at` trigger function and triggers for mutable tables
+- Added signup trigger to auto-create trial subscription rows in `subscriptions`
+- API routes now use session-based Supabase server client (anon key + auth cookie), not service-role querying
+
+### 6) API Scaffold (Implemented)
 - `GET /api/applications`
 - `POST /api/applications`
 - `GET /api/applications/:id`
@@ -48,27 +55,31 @@
 - `PATCH /api/rounds/:id`
 - `GET /api/subscription`
 
+### 7) Gmail OAuth + Manual Sync Foundation (Completed)
+- Added Gmail OAuth connect endpoint: `GET|POST /api/gmail/connect`
+- Added OAuth callback endpoint: `GET /api/gmail/callback`
+- Added encrypted token storage in `gmail_accounts`
+- Added manual sync endpoint: `POST /api/sync`
+- Added basic parsing and upsert flow into `job_applications` and `interview_rounds`
+- Settings page now supports Gmail connect and manual sync trigger
+
 ## What Still Needs To Be Built
 
 ## Phase 2 - Database and Security Hardening
-- Run `supabase/schema.sql` in Supabase project
-- Add Row Level Security (RLS) policies for each table
-- Add `updated_at` trigger function for consistency
+- Run `supabase/schema.sql` and `supabase/rls.sql` in Supabase project
+- Validate RLS behavior for all read/write APIs in authenticated session
 - Add seed/dev bootstrap script for local testing
 
 ## Phase 3 - Gmail Integration
-- Implement Google OAuth connect endpoint
-- Implement callback endpoint and secure token persistence
-- Add Gmail account connect/disconnect status in settings
-- Add token refresh handling and revocation handling
+- Add Gmail account disconnect flow in settings
+- Improve token refresh and revoked token recovery UX
+- Add richer sync result feedback in UI
 
 ## Phase 4 - Sync and Parsing Engine
-- Implement `POST /api/sync`
-- Add Gmail fetch using query filters and incremental sync strategy
 - Parse `.ics` invites first (DTSTART, DTEND, SUMMARY, LOCATION)
-- Add regex fallback for meeting links and round classification
-- Add dedupe and reschedule logic
-- Log sync results in `sync_runs`
+- Improve regex and subject parsing quality
+- Add stronger dedupe/reschedule logic
+- Add parser confidence and failed-item review
 
 ## Phase 5 - Product Features for MVP
 - Dashboard data wiring to real APIs
@@ -94,7 +105,7 @@
 
 ## Suggested Immediate Next Steps
 
-1. Configure Supabase project and run `supabase/schema.sql`.
-2. Add RLS policies and remove dependency on service-role querying in application APIs.
-3. Build Gmail OAuth connect/callback endpoints.
-4. Implement `POST /api/sync` with ICS-first parsing.
+1. Add ICS attachment parser and timezone-safe date extraction.
+2. Add sync result UI feedback and sync history panel.
+3. Add Stripe checkout/portal/webhook flow.
+4. Add dashboard forms for application and round CRUD.

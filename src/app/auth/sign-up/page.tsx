@@ -1,11 +1,11 @@
 import { AuthForm } from "@/components/auth-form";
 
 type SignUpPageProps = {
-  searchParams: Promise<{ next?: string }>;
+  searchParams?: { next?: string };
 };
 
-export default async function SignUpPage({ searchParams }: SignUpPageProps) {
-  const { next } = await searchParams;
+export default function SignUpPage({ searchParams }: SignUpPageProps) {
+  const next = searchParams?.next;
 
   return (
     <main className="shell flex flex-1 items-center justify-center px-6 py-12">

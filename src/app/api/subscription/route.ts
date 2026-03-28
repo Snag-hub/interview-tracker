@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { hasSupabaseConfig } from "@/lib/env";
 import { serviceUnavailable, unauthorized } from "@/lib/api/responses";
 import { getSessionUser } from "@/lib/auth/session-user";
-import { createAdminClient } from "@/lib/supabase/admin-client";
+import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 
 export async function GET() {
   if (!hasSupabaseConfig()) {
@@ -14,7 +14,7 @@ export async function GET() {
     return unauthorized();
   }
 
-  const supabase = createAdminClient();
+  const supabase = await createSupabaseServerClient();
 
   const { data, error } = await supabase
     .from("subscriptions")

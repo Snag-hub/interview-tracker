@@ -12,8 +12,13 @@ export async function createSupabaseServerClient() {
         return cookieStore.getAll();
       },
       setAll(cookiesToSet) {
-        for (const cookie of cookiesToSet) {
-          cookieStore.set(cookie.name, cookie.value, cookie.options);
+        try {
+          for (const cookie of cookiesToSet) {
+            cookieStore.set(cookie.name, cookie.value, cookie.options);
+          }
+        } catch {
+          // In Server Components, cookies can only be modified by middleware or route handlers.
+          // Session refresh is handled in middleware, so it's safe to ignore this here.
         }
       },
     },
