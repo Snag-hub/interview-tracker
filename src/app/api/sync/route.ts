@@ -81,6 +81,14 @@ function hasConferenceSignal(subject: string, body: string, hasIcs: boolean): bo
   return conferenceLinkRegex.test(`${subject}\n${body}`);
 }
 
+function isReplyMessage(payload: GmailPayload | undefined, subject: string): boolean {
+  const inReplyTo = getHeader(payload, "In-Reply-To");
+  const references = getHeader(payload, "References");
+
+  if (inReplyTo || references) return true;
+  return /^\s*(re|fwd|fw)\s*:/i.test(subject);
+}
+
 function isMissingInterviewerColumns(message?: string | null) {
   if (!message) return false;
   return message.includes("organizer_email") || message.includes("attendee_emails");
@@ -272,6 +280,10 @@ export async function POST(request: Request) {
       const payload = message.payload as GmailPayload | undefined;
       const subject = getHeader(payload, "Subject") || "Interview Update";
       const fromHeader = getHeader(payload, "From");
+      if (isReplyMessage(payload, subject)) {
+        continue;
+      }
+
       const fallbackDate =
         parseHeaderDate(getHeader(payload, "Date")) ||
         (message.internalDate ? new Date(Number(message.internalDate)).toISOString() : null) ||

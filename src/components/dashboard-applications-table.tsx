@@ -39,6 +39,7 @@ export function DashboardApplicationsTable({ initialRows }: DashboardApplication
   const [companyInput, setCompanyInput] = useState("");
   const [roleInput, setRoleInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deletingApplicationId, setDeletingApplicationId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const startEdit = (applicationId: string, company: string, role: string) => {
@@ -98,6 +99,41 @@ export function DashboardApplicationsTable({ initialRows }: DashboardApplication
       setErrorMessage(error instanceof Error ? error.message : "Failed to update application");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const deleteApplicationGroup = async (applicationId: string) => {
+    const targetRow = rows.find((row) => row.applicationId === applicationId);
+    if (!targetRow) return;
+
+    const confirmed = window.confirm(
+      `Delete ${targetRow.company} - ${targetRow.role}? This will remove all linked interview rounds for this item.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingApplicationId(applicationId);
+    setErrorMessage(null);
+
+    try {
+      for (const id of targetRow.relatedApplicationIds) {
+        const response = await fetch(`/api/applications/${id}`, {
+          method: "DELETE",
+        });
+
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(payload?.error || "Failed to delete application");
+        }
+      }
+
+      setRows((currentRows) => currentRows.filter((row) => row.applicationId !== applicationId));
+      if (editingApplicationId === applicationId) {
+        cancelEdit();
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to delete application");
+    } finally {
+      setDeletingApplicationId(null);
     }
   };
 
@@ -180,9 +216,18 @@ export function DashboardApplicationsTable({ initialRows }: DashboardApplication
                         <button
                           className="rounded-full bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-white hover:bg-[var(--accent-strong)]"
                           type="button"
+                          disabled={deletingApplicationId === row.applicationId}
                           onClick={() => startEdit(row.applicationId, row.company, row.role)}
                         >
                           Edit
+                        </button>
+                        <button
+                          className="rounded-full border border-red-300 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
+                          type="button"
+                          disabled={deletingApplicationId === row.applicationId}
+                          onClick={() => deleteApplicationGroup(row.applicationId)}
+                        >
+                          {deletingApplicationId === row.applicationId ? "Deleting..." : "Delete"}
                         </button>
                         <Link
                           href={`/applications/${row.applicationId}?related=${encodeURIComponent(row.relatedApplicationIds.join(","))}`}

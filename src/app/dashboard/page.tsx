@@ -6,6 +6,7 @@ import {
   type DashboardApplicationRow,
 } from "@/components/dashboard-applications-table";
 import { DashboardAddInterviewForm } from "@/components/dashboard-add-interview-form";
+import { DashboardSyncButton } from "@/components/dashboard-sync-button";
 
 type ApplicationRow = {
   id: string;
@@ -170,14 +171,7 @@ export default async function DashboardPage() {
             </p>
             <h1 className="mt-2 text-2xl font-semibold">Interview tracker overview</h1>
           </div>
-          <form action="/api/sync" method="post">
-            <button
-              className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
-              type="submit"
-            >
-              Sync now
-            </button>
-          </form>
+          <DashboardSyncButton />
         </header>
 
         <DashboardAddInterviewForm />

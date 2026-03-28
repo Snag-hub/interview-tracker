@@ -111,3 +111,35 @@ export async function PATCH(request: NextRequest, context: Params) {
     return NextResponse.json({ error: "Unexpected server error" }, { status: 500 });
   }
 }
+
+export async function DELETE(_: NextRequest, context: Params) {
+  if (!hasSupabaseConfig()) {
+    return serviceUnavailable("Supabase is not configured. Add env values from .env.example.");
+  }
+
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
+    return unauthorized();
+  }
+
+  const { id } = await context.params;
+  const supabase = await createSupabaseServerClient();
+
+  const { data, error } = await supabase
+    .from("job_applications")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", sessionUser.id)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  if (!data) {
+    return notFound("Application not found");
+  }
+
+  return NextResponse.json({ deleted: true, id: data.id }, { status: 200 });
+}
