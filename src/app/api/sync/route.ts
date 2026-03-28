@@ -42,10 +42,12 @@ function collectBody(payload?: GmailPayload): string {
 function collectAttachmentParts(payload?: GmailPayload): GmailPayload[] {
   if (!payload) return [];
 
-  const current =
-    payload.filename && payload.filename.toLowerCase().endsWith(".ics") && payload.body?.attachmentId
-      ? [payload]
-      : [];
+  const isCalendarPart =
+    payload.mimeType?.toLowerCase() === "text/calendar" ||
+    payload.filename?.toLowerCase().endsWith(".ics");
+
+  const hasIcsData = Boolean(payload.body?.data || payload.body?.attachmentId);
+  const current = isCalendarPart && hasIcsData ? [payload] : [];
 
   return [...current, ...(payload.parts ?? []).flatMap((part) => collectAttachmentParts(part))];
 }
@@ -85,6 +87,7 @@ export async function POST(request: Request) {
   }
 
   let fetchedCount = 0;
+  let parsedCount = 0;
   let createdCount = 0;
   let updatedCount = 0;
   let failedCount = 0;
@@ -154,18 +157,18 @@ export async function POST(request: Request) {
       let icsData: ParsedIcs | null = null;
 
       for (const part of icsParts) {
-        const attachmentId = part.body?.attachmentId;
-        if (!attachmentId) {
-          continue;
+        let encoded = part.body?.data;
+
+        if (!encoded && part.body?.attachmentId) {
+          const attachmentResponse = await gmail.users.messages.attachments.get({
+            userId: "me",
+            messageId: messageRef.id,
+            id: part.body.attachmentId,
+          });
+
+          encoded = attachmentResponse.data.data ?? undefined;
         }
 
-        const attachmentResponse = await gmail.users.messages.attachments.get({
-          userId: "me",
-          messageId: messageRef.id,
-          id: attachmentId,
-        });
-
-        const encoded = attachmentResponse.data.data;
         if (!encoded) {
           continue;
         }
@@ -179,6 +182,7 @@ export async function POST(request: Request) {
       }
 
       const parsed = parseInvite(subject, body, fromHeader, fallbackDate, icsData);
+      parsedCount += 1;
 
       const scheduledDate = new Date(parsed.scheduledAt);
       const invalidDate = Number.isNaN(scheduledDate.getTime()) || scheduledDate.getUTCFullYear() < 2000;
@@ -296,7 +300,7 @@ export async function POST(request: Request) {
       user_id: user.id,
       status,
       fetched_count: fetchedCount,
-      parsed_count: fetchedCount,
+      parsed_count: parsedCount,
       created_count: createdCount,
       updated_count: updatedCount,
       failed_count: failedCount,
@@ -307,6 +311,7 @@ export async function POST(request: Request) {
     const payload = {
       status,
       fetchedCount,
+      parsedCount,
       createdCount,
       updatedCount,
       failedCount,
@@ -316,6 +321,10 @@ export async function POST(request: Request) {
     if (contentType.includes("application/x-www-form-urlencoded")) {
       const redirectUrl = new URL("/settings", request.url);
       redirectUrl.searchParams.set("sync", status);
+      redirectUrl.searchParams.set("fetched", String(fetchedCount));
+      redirectUrl.searchParams.set("created", String(createdCount));
+      redirectUrl.searchParams.set("updated", String(updatedCount));
+      redirectUrl.searchParams.set("failed", String(failedCount));
       return NextResponse.redirect(redirectUrl);
     }
 
@@ -325,7 +334,7 @@ export async function POST(request: Request) {
       user_id: user.id,
       status: "failed",
       fetched_count: fetchedCount,
-      parsed_count: fetchedCount,
+      parsed_count: parsedCount,
       created_count: createdCount,
       updated_count: updatedCount,
       failed_count: failedCount + 1,
@@ -339,6 +348,7 @@ export async function POST(request: Request) {
     if (contentType.includes("application/x-www-form-urlencoded")) {
       const redirectUrl = new URL("/settings", request.url);
       redirectUrl.searchParams.set("sync", "failed");
+      redirectUrl.searchParams.set("failed", String(failedCount + 1));
       return NextResponse.redirect(redirectUrl);
     }
 

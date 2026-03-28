@@ -14,8 +14,21 @@ const resumeLinks = [
 ];
 
 type SettingsPageProps = {
-  searchParams: Promise<{ sync?: string; gmail?: string }>;
+  searchParams: Promise<{
+    sync?: string;
+    gmail?: string;
+    fetched?: string;
+    created?: string;
+    updated?: string;
+    failed?: string;
+  }>;
 };
+
+function toCount(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) ? null : parsed;
+}
 
 export default async function SettingsPage({ searchParams }: SettingsPageProps) {
   const params = await searchParams;
@@ -25,14 +38,25 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
   }
 
   const supabase = await createSupabaseServerClient();
-  const [{ data: gmailAccount }, { data: subscription }] = await Promise.all([
+  const [{ data: gmailAccount }, { data: subscription }, { data: syncRuns }] = await Promise.all([
     supabase.from("gmail_accounts").select("google_email, last_sync_at").eq("user_id", user.id).maybeSingle(),
     supabase
       .from("subscriptions")
       .select("status, trial_ends_at, current_period_end")
       .eq("user_id", user.id)
       .maybeSingle(),
+    supabase
+      .from("sync_runs")
+      .select("id, started_at, ended_at, status, fetched_count, created_count, updated_count, failed_count")
+      .eq("user_id", user.id)
+      .order("started_at", { ascending: false })
+      .limit(8),
   ]);
+
+  const syncFetched = toCount(params.fetched);
+  const syncCreated = toCount(params.created);
+  const syncUpdated = toCount(params.updated);
+  const syncFailed = toCount(params.failed);
 
   return (
     <main className="shell flex flex-1 justify-center px-6 py-10">
@@ -47,9 +71,19 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
           </p>
         ) : null}
         {params.sync ? (
-          <p className="mt-2 rounded-lg bg-[var(--surface-alt)] px-3 py-2 text-sm text-black/75">
-            Last sync result: {params.sync}
-          </p>
+          <div className="mt-2 rounded-lg bg-[var(--surface-alt)] px-3 py-2 text-sm text-black/75">
+            <p>
+              Last sync result: <span className="font-semibold capitalize">{params.sync}</span>
+            </p>
+            {syncFetched !== null || syncCreated !== null || syncUpdated !== null || syncFailed !== null ? (
+              <p className="mt-1 text-xs text-black/65">
+                {syncFetched !== null ? `Fetched ${syncFetched}` : null}
+                {syncCreated !== null ? ` | Created ${syncCreated}` : null}
+                {syncUpdated !== null ? ` | Updated ${syncUpdated}` : null}
+                {syncFailed !== null ? ` | Failed ${syncFailed}` : null}
+              </p>
+            ) : null}
+          </div>
         ) : null}
 
         <div className="mt-6 grid gap-4 md:grid-cols-2">
@@ -117,6 +151,30 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               </li>
             ))}
           </ul>
+        </article>
+
+        <article className="mt-4 rounded-xl border border-[var(--border)] p-4">
+          <h2 className="text-lg font-semibold">Sync history</h2>
+          {syncRuns && syncRuns.length > 0 ? (
+            <ul className="mt-3 space-y-2 text-sm">
+              {syncRuns.map((run) => (
+                <li key={run.id} className="rounded-lg bg-[var(--surface-alt)] px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="font-semibold capitalize">{run.status}</span>
+                    <span className="text-black/55">-</span>
+                    <span className="text-black/70">
+                      {run.ended_at ? new Date(run.ended_at).toLocaleString() : new Date(run.started_at).toLocaleString()}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-black/65">
+                    Fetched {run.fetched_count} | Created {run.created_count} | Updated {run.updated_count} | Failed {run.failed_count}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-sm text-black/65">No sync runs yet. Connect Gmail and run your first sync.</p>
+          )}
         </article>
       </section>
     </main>

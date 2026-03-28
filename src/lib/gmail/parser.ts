@@ -79,10 +79,71 @@ const timezoneAliasMap: Record<string, string> = {
   UTC: "UTC",
 };
 
-const timezoneOffsetMinutesMap: Record<string, number> = {
-  "Asia/Kolkata": 330,
-  UTC: 0,
+type IcsDateParts = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
 };
+
+function parseIcsDateParts(rawValue: string): IcsDateParts | null {
+  const match = rawValue.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/);
+  if (!match) return null;
+
+  const [, y, m, d, hh, mm, ss] = match;
+  return {
+    year: Number(y),
+    month: Number(m),
+    day: Number(d),
+    hour: Number(hh),
+    minute: Number(mm),
+    second: Number(ss),
+  };
+}
+
+function getOffsetMinutesForTimeZone(date: Date, timezone: string): number {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(date);
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  const year = Number(map.year);
+  const month = Number(map.month);
+  const day = Number(map.day);
+  const hour = Number(map.hour);
+  const minute = Number(map.minute);
+  const second = Number(map.second);
+
+  if ([year, month, day, hour, minute, second].some((value) => Number.isNaN(value))) {
+    return 0;
+  }
+
+  const interpretedAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  return Math.round((interpretedAsUtc - date.getTime()) / 60_000);
+}
+
+function toUtcIsoFromTimezoneParts(parts: IcsDateParts, timezone: string): string {
+  const localAsUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+
+  const firstOffset = getOffsetMinutesForTimeZone(new Date(localAsUtc), timezone);
+  let utcTimestamp = localAsUtc - firstOffset * 60_000;
+
+  const secondOffset = getOffsetMinutesForTimeZone(new Date(utcTimestamp), timezone);
+  utcTimestamp = localAsUtc - secondOffset * 60_000;
+
+  return new Date(utcTimestamp).toISOString();
+}
 
 function parseIcsDateWithTimezone(rawValue: string | null, timezone: string | null): string | null {
   if (!rawValue) return null;
@@ -94,36 +155,48 @@ function parseIcsDateWithTimezone(rawValue: string | null, timezone: string | nu
     return parseIcsDate(value);
   }
 
-  const match = value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/);
-  if (!match) {
+  const parts = parseIcsDateParts(value);
+  if (!parts) {
     return parseIcsDate(value);
   }
 
-  const [, y, m, d, hh, mm, ss] = match;
-  const offsetMinutes = normalizedTimezone
-    ? timezoneOffsetMinutesMap[normalizedTimezone] ?? 0
-    : 0;
+  if (!normalizedTimezone) {
+    return parseIcsDate(value);
+  }
 
-  const utcMillis =
-    Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss)) -
-    offsetMinutes * 60_000;
-  return new Date(utcMillis).toISOString();
+  try {
+    return toUtcIsoFromTimezoneParts(parts, normalizedTimezone);
+  } catch {
+    return parseIcsDate(value);
+  }
+}
+
+function getIcsPropertyLine(lines: string[], key: string): string | null {
+  return (
+    lines.find(
+      (item) => item.toUpperCase().startsWith(`${key}:`) || item.toUpperCase().startsWith(`${key};`),
+    ) ?? null
+  );
 }
 
 function getIcsProperty(lines: string[], key: string): string | null {
-  const line = lines.find(
-    (item) => item.toUpperCase().startsWith(`${key}:`) || item.toUpperCase().startsWith(`${key};`),
-  );
+  const line = getIcsPropertyLine(lines, key);
   if (!line) return null;
   const [, value] = line.split(/:(.+)/);
   return value?.trim() ?? null;
 }
 
-function getIcsTimezone(lines: string[]): string | null {
-  const line = lines.find((item) => item.toUpperCase().startsWith("DTSTART;TZID="));
+function getIcsTimezone(lines: string[], key: "DTSTART" | "DTEND"): string | null {
+  const line = getIcsPropertyLine(lines, key);
   if (!line) return null;
-  const tzMatch = line.match(/^DTSTART;TZID=([^:;]+)[;:]?/i);
-  return tzMatch?.[1] ?? null;
+
+  const tzMatch = line.match(/(?:^|;)TZID=([^:;]+)/i);
+  if (tzMatch?.[1]) {
+    return tzMatch[1];
+  }
+
+  const wrapperTimezone = getIcsProperty(lines, "X-WR-TIMEZONE");
+  return wrapperTimezone ?? null;
 }
 
 function getIcsEmail(lines: string[], key: string): string | null {
@@ -177,7 +250,7 @@ export function parseIcsContent(rawIcs: string): ParsedIcs | null {
   const description = decodeIcsText(getIcsProperty(lines, "DESCRIPTION"));
   const startRaw = getIcsProperty(lines, "DTSTART");
   const endRaw = getIcsProperty(lines, "DTEND");
-  const timezone = getIcsTimezone(lines);
+  const timezone = getIcsTimezone(lines, "DTSTART") ?? getIcsTimezone(lines, "DTEND");
   const organizerEmail = getIcsEmail(lines, "ORGANIZER");
   const attendeeEmails = getIcsAttendeeEmails(lines);
   const status = decodeIcsText(getIcsProperty(lines, "STATUS"));
@@ -325,16 +398,25 @@ function pickRoleFromParts(parts: string[]): string | null {
 }
 
 function fallbackCompanyFromEmail(fromHeader: string): string | null {
-  const domain = fromHeader.match(/@([A-Z0-9.-]+)\.[A-Z]{2,}/i)?.[1];
+  const domain = fromHeader.match(/@([A-Z0-9.-]+\.[A-Z]{2,})/i)?.[1]?.toLowerCase();
   if (!domain) return null;
 
-  const domainRoot = domain
-    .split(".")
-    .slice(0, -1)
-    .filter((segment) => !["mail", "mailer", "noreply", "notifications", "careers"].includes(segment))
-    .pop();
+  const segments = domain.split(".").filter(Boolean);
+  if (segments.length < 2) return null;
 
+  const tld = segments[segments.length - 1];
+  const secondLevel = segments[segments.length - 2];
+  const countryCodeTlds = new Set(["in", "uk", "au", "nz", "za", "jp", "sg"]);
+  const secondLevelSuffixes = new Set(["co", "com", "org", "net", "gov", "ac"]);
+
+  let brandIndex = segments.length - 2;
+  if (countryCodeTlds.has(tld) && secondLevelSuffixes.has(secondLevel) && segments.length >= 3) {
+    brandIndex = segments.length - 3;
+  }
+
+  const domainRoot = segments[brandIndex]?.replace(/[^a-z0-9-]/gi, "").trim();
   if (!domainRoot) return null;
+
   return toTitleCase(domainRoot);
 }
 
@@ -344,11 +426,73 @@ function companyFromEmailAddress(email: string | null): string | null {
   if (!company) return null;
 
   const normalized = company.toLowerCase();
-  if (["gmail", "outlook", "hotmail", "yahoo", "google", "microsoft"].includes(normalized)) {
+  if (["gmail", "outlook", "hotmail", "yahoo", "google", "microsoft", "calendar", "mail"].includes(normalized)) {
     return null;
   }
 
   return company;
+}
+
+function normalizeCompanyCandidate(value: string | null | undefined): string | null {
+  const cleaned = pickCandidate(value);
+  if (!cleaned) return null;
+
+  let normalized = cleaned.replace(/^\b(with|for|at)\b\s+/i, "").trim();
+
+  if (normalized.includes("/")) {
+    normalized = normalized
+      .split("/")
+      .map((part) => part.trim())
+      .find(Boolean) ?? normalized;
+  }
+
+  normalized = normalized.split(/\s+with\s+/i)[0]?.trim() ?? normalized;
+  normalized = normalized.replace(/[.,;:]+$/g, "").trim();
+
+  return normalized || null;
+}
+
+function isLikelyCompanyName(value: string | null): boolean {
+  if (!value) return false;
+  const candidate = value.trim();
+  if (!candidate || candidate.length < 2 || candidate.length > 80) return false;
+  if (/^\d+$/.test(candidate)) return false;
+  if (/^\.[a-z]+$/i.test(candidate)) return false;
+  if (candidate.includes("@") || /https?:\/\//i.test(candidate)) return false;
+
+  const lowered = candidate.toLowerCase();
+  const blockedTerms = [
+    "with ",
+    "discussion",
+    "interview",
+    "calendar",
+    "confirmation",
+    "rescheduled",
+    "scheduled",
+    "online",
+    "technical",
+    "f2f",
+    "connectwise software engineer",
+    "information technology act",
+  ];
+
+  if (blockedTerms.some((term) => lowered.includes(term))) return false;
+  if (/(\bmon\b|\btue\b|\bwed\b|\bthu\b|\bfri\b|\bsat\b|\bsun\b|\bgmt\b|\bam\b|\bpm\b)/i.test(lowered)) {
+    return false;
+  }
+
+  const words = candidate.split(/\s+/).filter(Boolean);
+  const hasCompanyKeyword = /(technologies|technology|solutions|systems|labs|software|tech|ltd|limited|llc|inc|corp|group|services|consulting)/i.test(
+    lowered,
+  );
+
+  if (words.length > 5 && !hasCompanyKeyword) return false;
+
+  return true;
+}
+
+function resolveCompanyFallback(organizerEmail: string | null, fromHeader: string): string | null {
+  return companyFromEmailAddress(organizerEmail) || fallbackCompanyFromEmail(fromHeader);
 }
 
 function fallbackCompanyFromSignature(body: string): string | null {
@@ -375,6 +519,16 @@ function extractCompanyAndRole(
   organizerEmail: string | null,
   icsSummary: string | null,
 ): { company: string; role: string } {
+  const fallbackFromEmail = resolveCompanyFallback(organizerEmail, fromHeader);
+
+  const finalizeCompany = (candidate: string | null): string => {
+    const normalized = normalizeCompanyCandidate(candidate);
+    if (isLikelyCompanyName(normalized)) {
+      return normalized as string;
+    }
+    return fallbackFromEmail || "Unknown Company";
+  };
+
   const trimmed = (icsSummary || subject).trim();
   const summaryParts = trimmed
     .split("||")
@@ -386,7 +540,7 @@ function extractCompanyAndRole(
     const roleFromSummary = pickRoleFromParts(summaryParts);
     const roleFromSubject = pickCandidate(subject);
     return {
-      company: companyFromOrganizer,
+      company: finalizeCompany(companyFromOrganizer),
       role: roleFromSummary || roleFromSubject || "Unknown Role",
     };
   }
@@ -397,7 +551,7 @@ function extractCompanyAndRole(
 
     if (companyCandidate) {
       return {
-        company: companyCandidate,
+        company: finalizeCompany(companyCandidate),
         role: roleCandidate || "Unknown Role",
       };
     }
@@ -411,7 +565,7 @@ function extractCompanyAndRole(
     if (companyCandidate || roleCandidate) {
       return {
         role: roleCandidate || "Unknown Role",
-        company: companyCandidate || "Unknown Company",
+        company: finalizeCompany(companyCandidate),
       };
     }
   }
@@ -424,7 +578,7 @@ function extractCompanyAndRole(
     if (companyCandidate || roleCandidate) {
       return {
         role: roleCandidate || "Unknown Role",
-        company: companyCandidate || "Unknown Company",
+        company: finalizeCompany(companyCandidate),
       };
     }
   }
@@ -437,7 +591,7 @@ function extractCompanyAndRole(
       pickCandidate(trimmed) || "",
     ]);
     return {
-      company: companyFromEmail,
+      company: finalizeCompany(companyFromEmail),
       role: roleCandidate || "Unknown Role",
     };
   }
@@ -447,7 +601,7 @@ function extractCompanyAndRole(
     const companyCandidate = pickCandidate(fromByMatch[1]);
     if (companyCandidate) {
       return {
-        company: companyCandidate,
+        company: finalizeCompany(companyCandidate),
         role: "Unknown Role",
       };
     }
@@ -460,7 +614,7 @@ function extractCompanyAndRole(
 
   if (dashMatch.length >= 2) {
     return {
-      company: dashMatch[0] || "Unknown Company",
+      company: finalizeCompany(dashMatch[0] || null),
       role: pickRoleFromParts(dashMatch as string[]) || "Unknown Role",
     };
   }
@@ -469,13 +623,13 @@ function extractCompanyAndRole(
 
   if (companyFromSignature) {
     return {
-      company: companyFromSignature,
+      company: finalizeCompany(companyFromSignature),
       role: cleanToken(subject) || "Unknown Role",
     };
   }
 
   return {
-    company: "Unknown Company",
+    company: finalizeCompany(null),
     role: "Unknown Role",
   };
 }

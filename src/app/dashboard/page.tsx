@@ -73,12 +73,14 @@ export default async function DashboardPage() {
             </p>
             <h1 className="mt-2 text-2xl font-semibold">Upcoming interview rounds</h1>
           </div>
-          <button
-            className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
-            type="button"
-          >
-            Sync now
-          </button>
+          <form action="/api/sync" method="post">
+            <button
+              className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
+              type="submit"
+            >
+              Sync now
+            </button>
+          </form>
         </header>
 
         {dashboardRows.length === 0 ? (
