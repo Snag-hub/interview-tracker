@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { SettingsReviewQueuePanel } from "@/components/settings-review-queue-panel";
 import { SettingsSyncControls } from "@/components/settings-sync-controls";
 import { getSessionUser } from "@/lib/auth/session-user";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
@@ -51,7 +52,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
       .select("id, started_at, ended_at, status, fetched_count, created_count, updated_count, failed_count")
       .eq("user_id", user.id)
       .order("started_at", { ascending: false })
-      .limit(8),
+      .limit(5),
   ]);
 
   const syncFetched = toCount(params.fetched);
@@ -69,6 +70,16 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
         {params.gmail === "connected" ? (
           <p className="mt-2 rounded-lg bg-emerald-100 px-3 py-2 text-sm text-emerald-800">
             Gmail connected successfully.
+          </p>
+        ) : null}
+        {params.gmail === "disconnected" ? (
+          <p className="mt-2 rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-800">
+            Gmail disconnected.
+          </p>
+        ) : null}
+        {params.gmail === "reconnect_required" ? (
+          <p className="mt-2 rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-800">
+            Gmail access expired or was revoked. Reconnect Gmail and run sync again.
           </p>
         ) : null}
         {params.sync ? (
@@ -103,6 +114,16 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               >
                 {gmailAccount ? "Reconnect Gmail" : "Connect Gmail"}
               </a>
+              {gmailAccount ? (
+                <form action="/api/gmail/disconnect" method="post">
+                  <button
+                    className="rounded-full border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50"
+                    type="submit"
+                  >
+                    Disconnect Gmail
+                  </button>
+                </form>
+              ) : null}
             </div>
             <SettingsSyncControls hasGmailAccount={Boolean(gmailAccount)} />
           </article>
@@ -162,6 +183,8 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
             <p className="mt-2 text-sm text-black/65">No sync runs yet. Connect Gmail and run your first sync.</p>
           )}
         </article>
+
+        <SettingsReviewQueuePanel />
       </section>
     </main>
   );

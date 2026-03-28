@@ -27,6 +27,7 @@ type CachedResolution = {
 const SYNC_QUERY =
   '(filename:ics OR "Microsoft Teams" OR "Join with Google Meet" OR "Web Conference") -subject:("walk in" OR "walk-in" OR walkin OR drive OR "hiring drive" OR "mega drive" OR "bulk hiring")';
 const PARSER_RESOLUTIONS_TABLE = "parser_resolutions";
+const SYNC_REVIEW_ITEMS_TABLE = "sync_review_items";
 const conferenceLinkRegex = /(https?:\/\/[\w./?=&%-]*(teams\.microsoft\.com|meet\.google\.com)[\w./?=&%-]*)/i;
 
 function parseHeaderDate(value: string): string | null {
@@ -148,6 +149,51 @@ function isMissingParserResolutionsTable(message?: string | null): boolean {
   return normalized.includes(PARSER_RESOLUTIONS_TABLE) || normalized.includes("does not exist");
 }
 
+function isMissingSyncReviewItemsTable(message?: string | null): boolean {
+  if (!message) return false;
+  const normalized = message.toLowerCase();
+  return normalized.includes(SYNC_REVIEW_ITEMS_TABLE) || normalized.includes("does not exist");
+}
+
+function getSyncErrorDetails(error: unknown): {
+  message: string;
+  statusCode: number;
+  code?: string;
+  reconnectRequired: boolean;
+} {
+  if (error instanceof Error) {
+    const details = JSON.stringify(error);
+    const combined = `${error.message} ${details}`.toLowerCase();
+    const reconnectRequired =
+      combined.includes("invalid_grant") ||
+      combined.includes("token has been expired") ||
+      combined.includes("invalid credentials") ||
+      combined.includes("unauthorized_client") ||
+      combined.includes("insufficient authentication scopes");
+
+    if (reconnectRequired) {
+      return {
+        message: "Gmail authorization expired or revoked. Please reconnect Gmail from Settings and retry sync.",
+        statusCode: 401,
+        code: "GMAIL_RECONNECT_REQUIRED",
+        reconnectRequired: true,
+      };
+    }
+
+    return {
+      message: error.message,
+      statusCode: 500,
+      reconnectRequired: false,
+    };
+  }
+
+  return {
+    message: "Sync failed",
+    statusCode: 500,
+    reconnectRequired: false,
+  };
+}
+
 function getDomainFromHeader(fromHeader: string): string {
   return fromHeader.match(/@([a-z0-9.-]+\.[a-z]{2,})/i)?.[1]?.toLowerCase() ?? "";
 }
@@ -219,6 +265,7 @@ export async function POST(request: Request) {
   const geminiEnv = geminiEnabled ? getGeminiEnv() : null;
   let geminiCallsUsed = 0;
   let parserResolutionTableAvailable = true;
+  let syncReviewItemsTableAvailable = true;
   const resolutionCache = new Map<string, CachedResolution | null>();
 
   try {
@@ -320,6 +367,23 @@ export async function POST(request: Request) {
 
       const parsed = parseInvite(subject, body, fromHeader, fallbackDate, icsData);
       parsedCount += 1;
+      const signature = buildResolutionSignature(
+        subject,
+        fromHeader,
+        icsData?.organizerEmail ?? null,
+        icsData?.summary ?? null,
+      );
+
+      const parserCompanyBeforeAi = parsed.company;
+      const parserRoleBeforeAi = parsed.role;
+      const parserInvalidBeforeAi =
+        isClearlyInvalidCompany(parserCompanyBeforeAi) || isClearlyInvalidRole(parserRoleBeforeAi);
+      let aiUsed = false;
+      let aiChosen = false;
+      let aiConfidence = 0;
+      let disagreement = false;
+      let parserSource: "rule" | "gemini" | "fallback" = "rule";
+      const reviewReasons: string[] = [];
 
       const conferenceSignal = hasConferenceSignal(subject, body, Boolean(icsData));
       if (!conferenceSignal) {
@@ -327,13 +391,6 @@ export async function POST(request: Request) {
       }
 
       if (geminiEnabled) {
-        const signature = buildResolutionSignature(
-          subject,
-          fromHeader,
-          icsData?.organizerEmail ?? null,
-          icsData?.summary ?? null,
-        );
-
         let aiResult: CachedResolution | null | undefined = resolutionCache.get(signature);
 
         if (aiResult === undefined) {
@@ -406,13 +463,34 @@ export async function POST(request: Request) {
           resolutionCache.set(signature, aiResult);
         }
 
+        if (aiResult) {
+          aiUsed = true;
+          aiConfidence = aiResult.confidence;
+          disagreement =
+            normalizeExtractionValue(parserCompanyBeforeAi) !== normalizeExtractionValue(aiResult.company) ||
+            normalizeExtractionValue(parserRoleBeforeAi) !== normalizeExtractionValue(aiResult.role);
+        }
+
         if (
           aiResult &&
           shouldUseAiResult(parsed.company, parsed.role, aiResult.company, aiResult.role, aiResult.confidence)
         ) {
           parsed.company = aiResult.company;
           parsed.role = aiResult.role;
+          aiChosen = true;
+          parserSource = "gemini";
         }
+      }
+
+      if (parserInvalidBeforeAi && !aiChosen) {
+        parserSource = "fallback";
+      }
+
+      if (parserInvalidBeforeAi) {
+        reviewReasons.push("parser_invalid");
+      }
+      if (disagreement) {
+        reviewReasons.push("parser_ai_disagreement");
       }
 
       const scheduledDate = new Date(parsed.scheduledAt);
@@ -422,6 +500,31 @@ export async function POST(request: Request) {
       }
 
       if (parsed.company === "Unknown Company" && parsed.role === "Unknown Role") {
+        if (syncReviewItemsTableAvailable) {
+          const reviewInsert = await supabase.from(SYNC_REVIEW_ITEMS_TABLE).insert({
+            user_id: user.id,
+            source_email_id: message.id,
+            source_thread_id: message.threadId,
+            signature,
+            raw_subject: subject,
+            raw_from: fromHeader,
+            raw_snippet: body.slice(0, 500),
+            proposed_company: parsed.company,
+            proposed_role: parsed.role,
+            proposed_round_type: parsed.roundType,
+            proposed_status: parsed.status,
+            parser_source: parserSource,
+            confidence: aiChosen ? aiConfidence : parserInvalidBeforeAi ? 0.45 : 0.8,
+            reason: [...reviewReasons, "unknown_values"].join(", "),
+            ai_used: aiUsed,
+            review_status: "pending",
+          });
+
+          if (reviewInsert.error && isMissingSyncReviewItemsTable(reviewInsert.error.message)) {
+            syncReviewItemsTableAvailable = false;
+          }
+        }
+
         failedCount += 1;
         continue;
       }
@@ -486,6 +589,11 @@ export async function POST(request: Request) {
         createdCount += 1;
       }
 
+      const finalConfidence = aiChosen ? aiConfidence : parserInvalidBeforeAi ? 0.45 : 0.82;
+      if (finalConfidence < 0.75) {
+        reviewReasons.push("low_confidence");
+      }
+
       const roundBasePayload = {
         application_id: applicationId,
         round_type: parsed.roundType,
@@ -514,8 +622,60 @@ export async function POST(request: Request) {
       }
 
       if (roundInsertError) {
+        if (syncReviewItemsTableAvailable) {
+          const reviewInsert = await supabase.from(SYNC_REVIEW_ITEMS_TABLE).insert({
+            user_id: user.id,
+            source_email_id: message.id,
+            source_thread_id: message.threadId,
+            signature,
+            application_id: applicationId,
+            raw_subject: subject,
+            raw_from: fromHeader,
+            raw_snippet: body.slice(0, 500),
+            proposed_company: parsed.company,
+            proposed_role: parsed.role,
+            proposed_round_type: parsed.roundType,
+            proposed_status: parsed.status,
+            parser_source: parserSource,
+            confidence: finalConfidence,
+            reason: [...reviewReasons, "round_insert_failed"].join(", "),
+            ai_used: aiUsed,
+            review_status: "pending",
+          });
+
+          if (reviewInsert.error && isMissingSyncReviewItemsTable(reviewInsert.error.message)) {
+            syncReviewItemsTableAvailable = false;
+          }
+        }
+
         failedCount += 1;
       } else {
+        if (syncReviewItemsTableAvailable && reviewReasons.length > 0) {
+          const reviewInsert = await supabase.from(SYNC_REVIEW_ITEMS_TABLE).insert({
+            user_id: user.id,
+            source_email_id: message.id,
+            source_thread_id: message.threadId,
+            signature,
+            application_id: applicationId,
+            raw_subject: subject,
+            raw_from: fromHeader,
+            raw_snippet: body.slice(0, 500),
+            proposed_company: parsed.company,
+            proposed_role: parsed.role,
+            proposed_round_type: parsed.roundType,
+            proposed_status: parsed.status,
+            parser_source: parserSource,
+            confidence: finalConfidence,
+            reason: reviewReasons.join(", "),
+            ai_used: aiUsed,
+            review_status: "pending",
+          });
+
+          if (reviewInsert.error && isMissingSyncReviewItemsTable(reviewInsert.error.message)) {
+            syncReviewItemsTableAvailable = false;
+          }
+        }
+
         createdCount += 1;
       }
     }
@@ -562,6 +722,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json(payload);
   } catch (error) {
+    const errorDetails = getSyncErrorDetails(error);
+
     await supabase.from("sync_runs").insert({
       user_id: user.id,
       status: "failed",
@@ -571,19 +733,26 @@ export async function POST(request: Request) {
       updated_count: updatedCount,
       failed_count: failedCount + 1,
       ended_at: new Date().toISOString(),
-      error_summary: error instanceof Error ? error.message : "Unknown sync failure",
+      error_summary: errorDetails.message,
     });
-
-    const message = error instanceof Error ? error.message : "Sync failed";
     const contentType = request.headers.get("content-type") ?? "";
 
     if (contentType.includes("application/x-www-form-urlencoded")) {
       const redirectUrl = new URL("/settings", request.url);
       redirectUrl.searchParams.set("sync", "failed");
       redirectUrl.searchParams.set("failed", String(failedCount + 1));
+      if (errorDetails.reconnectRequired) {
+        redirectUrl.searchParams.set("gmail", "reconnect_required");
+      }
       return NextResponse.redirect(redirectUrl);
     }
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: errorDetails.message,
+        code: errorDetails.code,
+      },
+      { status: errorDetails.statusCode },
+    );
   }
 }

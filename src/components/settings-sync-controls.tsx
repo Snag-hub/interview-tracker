@@ -27,6 +27,7 @@ export function SettingsSyncControls({ hasGmailAccount }: SettingsSyncControlsPr
   const [isSyncing, setIsSyncing] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [reconnectRequired, setReconnectRequired] = useState(false);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [fromDate, setFromDate] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -39,6 +40,7 @@ export function SettingsSyncControls({ hasGmailAccount }: SettingsSyncControlsPr
     setIsSyncing(true);
     setElapsedSeconds(0);
     setSyncError(null);
+    setReconnectRequired(false);
     setSyncResult(null);
 
     const timer = setInterval(() => {
@@ -67,11 +69,15 @@ export function SettingsSyncControls({ hasGmailAccount }: SettingsSyncControlsPr
             updatedCount?: number;
             failedCount?: number;
             aiCallsUsed?: number;
+            code?: string;
             error?: string;
           }
         | null;
 
       if (!response.ok) {
+        if (payload?.code === "GMAIL_RECONNECT_REQUIRED") {
+          setReconnectRequired(true);
+        }
         throw new Error(payload?.error || "Sync failed");
       }
 
@@ -153,6 +159,11 @@ export function SettingsSyncControls({ hasGmailAccount }: SettingsSyncControlsPr
       ) : null}
 
       {syncError ? <p className="mt-3 text-sm text-red-700">{syncError}</p> : null}
+      {reconnectRequired ? (
+        <p className="mt-2 text-sm text-amber-700">
+          Gmail needs reconnection. Use <a className="underline" href="/api/gmail/connect">Reconnect Gmail</a> and retry sync.
+        </p>
+      ) : null}
     </div>
   );
 }

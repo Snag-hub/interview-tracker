@@ -41,6 +41,11 @@ create trigger set_parser_resolutions_updated_at
 before update on public.parser_resolutions
 for each row execute procedure public.set_updated_at();
 
+drop trigger if exists set_sync_review_items_updated_at on public.sync_review_items;
+create trigger set_sync_review_items_updated_at
+before update on public.sync_review_items
+for each row execute procedure public.set_updated_at();
+
 -- Enable RLS
 alter table public.subscriptions enable row level security;
 alter table public.gmail_accounts enable row level security;
@@ -49,6 +54,7 @@ alter table public.resume_versions enable row level security;
 alter table public.interview_rounds enable row level security;
 alter table public.sync_runs enable row level security;
 alter table public.parser_resolutions enable row level security;
+alter table public.sync_review_items enable row level security;
 
 -- subscriptions
 drop policy if exists subscriptions_owner_all on public.subscriptions;
@@ -99,6 +105,15 @@ with check (auth.uid() = user_id);
 drop policy if exists parser_resolutions_owner_all on public.parser_resolutions;
 create policy parser_resolutions_owner_all
 on public.parser_resolutions
+for all
+to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+-- sync_review_items
+drop policy if exists sync_review_items_owner_all on public.sync_review_items;
+create policy sync_review_items_owner_all
+on public.sync_review_items
 for all
 to authenticated
 using (auth.uid() = user_id)

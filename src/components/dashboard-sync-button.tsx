@@ -12,11 +12,13 @@ export function DashboardSyncButton() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [reconnectRequired, setReconnectRequired] = useState(false);
 
   const onSync = async () => {
     setIsSyncing(true);
     setElapsedSeconds(0);
     setError(null);
+    setReconnectRequired(false);
 
     const timer = setInterval(() => {
       setElapsedSeconds((value) => value + 1);
@@ -24,9 +26,14 @@ export function DashboardSyncButton() {
 
     try {
       const response = await fetch("/api/sync", { method: "POST" });
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string; code?: string }
+        | null;
 
       if (!response.ok) {
+        if (payload?.code === "GMAIL_RECONNECT_REQUIRED") {
+          setReconnectRequired(true);
+        }
         throw new Error(payload?.error || "Sync failed");
       }
 
@@ -61,6 +68,11 @@ export function DashboardSyncButton() {
       ) : null}
 
       {error ? <p className="mt-2 text-xs text-red-700">{error}</p> : null}
+      {reconnectRequired ? (
+        <p className="mt-2 text-xs text-amber-700">
+          Gmail needs reconnection. <a className="underline" href="/api/gmail/connect">Reconnect Gmail</a>.
+        </p>
+      ) : null}
     </div>
   );
 }

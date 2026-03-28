@@ -125,6 +125,34 @@ create table if not exists public.parser_resolutions (
   unique (user_id, signature)
 );
 
+create table if not exists public.sync_review_items (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  sync_run_id uuid references public.sync_runs(id) on delete set null,
+  source_email_id text,
+  source_thread_id text,
+  signature text,
+  application_id uuid references public.job_applications(id) on delete set null,
+  raw_subject text not null,
+  raw_from text,
+  raw_snippet text,
+  proposed_company text not null,
+  proposed_role text not null,
+  proposed_round_type round_type,
+  proposed_status round_status,
+  parser_source text not null default 'rule',
+  confidence numeric(5,4) not null default 0,
+  reason text,
+  ai_used boolean not null default false,
+  review_status text not null default 'pending',
+  resolved_company text,
+  resolved_role text,
+  resolved_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint sync_review_items_status_check check (review_status in ('pending', 'applied', 'dismissed'))
+);
+
 create index if not exists idx_interview_rounds_application_start
   on public.interview_rounds(application_id, scheduled_start_utc);
 
@@ -139,3 +167,12 @@ create index if not exists idx_subscriptions_user_id
 
 create index if not exists idx_parser_resolutions_user_used
   on public.parser_resolutions(user_id, last_used_at desc);
+
+create index if not exists idx_sync_review_items_user_status_created
+  on public.sync_review_items(user_id, review_status, created_at desc);
+
+create index if not exists idx_sync_review_items_thread
+  on public.sync_review_items(user_id, source_thread_id);
+
+create index if not exists idx_sync_review_items_signature
+  on public.sync_review_items(user_id, signature);
