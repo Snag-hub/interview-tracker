@@ -1,19 +1,9 @@
 import { redirect } from "next/navigation";
 import { SettingsReviewQueuePanel } from "@/components/settings-review-queue-panel";
 import { SettingsSyncControls } from "@/components/settings-sync-controls";
+import { ResumeManager } from "@/components/settings-resume-manager";
 import { getSessionUser } from "@/lib/auth/session-user";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
-
-const resumeLinks = [
-  {
-    label: "Resume v3 - Backend",
-    url: "https://drive.google.com/file/d/example-backend-resume",
-  },
-  {
-    label: "Resume v2 - Fullstack",
-    url: "https://drive.google.com/file/d/example-fullstack-resume",
-  },
-];
 
 type SettingsPageProps = {
   searchParams: Promise<{
@@ -32,6 +22,21 @@ function toCount(value: string | undefined): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+function SyncStatusBadge({ status }: { status: string }) {
+  const s = status.toLowerCase();
+  let base = "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ";
+
+  if (s === "success") {
+    base += "bg-emerald-50 text-emerald-700 border-emerald-200";
+  } else if (s === "partial") {
+    base += "bg-amber-50 text-amber-700 border-amber-200";
+  } else {
+    base += "bg-rose-50 text-rose-700 border-rose-200";
+  }
+
+  return <span className={base}>{status}</span>;
+}
+
 export default async function SettingsPage({ searchParams }: SettingsPageProps) {
   const params = await searchParams;
   const user = await getSessionUser();
@@ -40,7 +45,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
   }
 
   const supabase = await createSupabaseServerClient();
-  const [{ data: gmailAccount }, { data: subscription }, { data: syncRuns }] = await Promise.all([
+  const [{ data: gmailAccount }, { data: subscription }, { data: syncRuns }, { data: resumeVersions }] = await Promise.all([
     supabase.from("gmail_accounts").select("google_email, last_sync_at").eq("user_id", user.id).maybeSingle(),
     supabase
       .from("subscriptions")
@@ -53,6 +58,11 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
       .eq("user_id", user.id)
       .order("started_at", { ascending: false })
       .limit(5),
+    supabase
+      .from("resume_versions")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false }),
   ]);
 
   const syncFetched = toCount(params.fetched);
@@ -62,129 +72,160 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
 
   return (
     <main className="shell flex flex-1 justify-center px-6 py-10">
-      <section className="w-full max-w-5xl rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 md:p-8">
-        <p className="font-mono text-xs uppercase tracking-[0.2em] text-[var(--accent)]">
-          Settings
-        </p>
-        <h1 className="mt-2 text-2xl font-semibold">Gmail and billing setup</h1>
-        {params.gmail === "connected" ? (
-          <p className="mt-2 rounded-lg bg-emerald-100 px-3 py-2 text-sm text-emerald-800">
-            Gmail connected successfully.
+      <section className="w-full max-w-5xl">
+        <header className="mb-10">
+          <p className="font-mono text-xs uppercase tracking-[0.2em] text-[var(--accent)]">
+            Account
           </p>
-        ) : null}
-        {params.gmail === "disconnected" ? (
-          <p className="mt-2 rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-800">
-            Gmail disconnected.
+          <h1 className="mt-2 text-3xl font-bold tracking-tight">Settings & Integrations</h1>
+          <p className="mt-2 text-sm text-black/50">
+            Manage your Gmail connection, resume versions, and subscription.
           </p>
-        ) : null}
-        {params.gmail === "reconnect_required" ? (
-          <p className="mt-2 rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-800">
-            Gmail access expired or was revoked. Reconnect Gmail and run sync again.
-          </p>
-        ) : null}
-        {params.sync ? (
-          <div className="mt-2 rounded-lg bg-[var(--surface-alt)] px-3 py-2 text-sm text-black/75">
-            <p>
-              Last sync result: <span className="font-semibold capitalize">{params.sync}</span>
-            </p>
-            {syncFetched !== null || syncCreated !== null || syncUpdated !== null || syncFailed !== null ? (
-              <p className="mt-1 text-xs text-black/65">
-                {syncFetched !== null ? `Fetched ${syncFetched}` : null}
-                {syncCreated !== null ? ` | Created ${syncCreated}` : null}
-                {syncUpdated !== null ? ` | Updated ${syncUpdated}` : null}
-                {syncFailed !== null ? ` | Failed ${syncFailed}` : null}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
+        </header>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-2">
-          <article className="rounded-xl border border-[var(--border)] p-4">
-            <h2 className="text-lg font-semibold">Gmail integration</h2>
-            <p className="mt-1 text-sm text-black/70">
-              Status: {gmailAccount ? `Connected (${gmailAccount.google_email})` : "Not connected"}
+        {params.gmail === "connected" && (
+          <div className="mb-6 rounded-2xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm font-bold text-emerald-800 flex items-center gap-3">
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            Gmail connected successfully.
+          </div>
+        )}
+
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* Gmail Card */}
+          <article className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-6">
+              <div className="h-12 w-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
+                </svg>
+              </div>
+              <div className="flex flex-col items-end">
+                <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${gmailAccount ? "bg-emerald-50 text-emerald-700 border-emerald-100" : "bg-slate-50 text-slate-500 border-slate-100"}`}>
+                  {gmailAccount ? "Active" : "Disconnected"}
+                </span>
+              </div>
+            </div>
+
+            <h2 className="text-xl font-bold text-[var(--foreground)]">Gmail Integration</h2>
+            <p className="mt-1 text-sm text-black/50 leading-relaxed">
+              Required to automatically sync interview invites and calendar attachments.
             </p>
-            <p className="mt-1 text-xs text-black/60">
-              Last sync: {gmailAccount?.last_sync_at ? new Date(gmailAccount.last_sync_at).toLocaleString() : "Never"}
-            </p>
-            <div className="mt-4 flex gap-2">
+
+            <div className="mt-6 space-y-3">
+              <div className="rounded-xl bg-[var(--surface-alt)]/30 p-3 border border-[var(--border)]/30">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-black/40 mb-1">Connected Email</p>
+                <p className="text-sm font-bold text-black/80">{gmailAccount?.google_email ?? "Not linked"}</p>
+              </div>
+              <div className="rounded-xl bg-[var(--surface-alt)]/30 p-3 border border-[var(--border)]/30">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-black/40 mb-1">Last Sync</p>
+                <p className="text-sm font-bold text-black/80">
+                  {gmailAccount?.last_sync_at ? new Date(gmailAccount.last_sync_at).toLocaleString() : "Never"}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-8 flex flex-wrap gap-3">
               <a
-                className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
+                className="rounded-full bg-[var(--accent)] px-6 py-2.5 text-sm font-bold text-white shadow-md shadow-[var(--accent)]/20 transition-all hover:bg-[var(--accent-strong)]"
                 href="/api/gmail/connect"
               >
-                {gmailAccount ? "Reconnect Gmail" : "Connect Gmail"}
+                {gmailAccount ? "Update Connection" : "Link Gmail Account"}
               </a>
-              {gmailAccount ? (
+              {gmailAccount && (
                 <form action="/api/gmail/disconnect" method="post">
                   <button
-                    className="rounded-full border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50"
+                    className="rounded-full border border-rose-200 bg-white px-6 py-2.5 text-sm font-bold text-rose-600 transition-all hover:bg-rose-50"
                     type="submit"
                   >
-                    Disconnect Gmail
+                    Disconnect
                   </button>
                 </form>
-              ) : null}
+              )}
             </div>
-            <SettingsSyncControls hasGmailAccount={Boolean(gmailAccount)} />
+            
+            <div className="mt-6 border-t border-[var(--border)]/30 pt-6">
+               <SettingsSyncControls hasGmailAccount={Boolean(gmailAccount)} />
+            </div>
           </article>
 
-          <article className="rounded-xl border border-[var(--border)] p-4">
-            <h2 className="text-lg font-semibold">Subscription</h2>
-            <p className="mt-1 text-sm text-black/70">
-              Plan status: {subscription?.status ?? "Not initialized"}
+          {/* Subscription Card */}
+          <article className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm flex flex-col">
+            <div className="flex items-center justify-between mb-6">
+              <div className="h-12 w-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m.599-2.001C14.002 14.903 15 13.847 15 12.5s-1.002-2.503-2.401-2.999z" />
+                </svg>
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-100">
+                {subscription?.status ?? "Trial"}
+              </span>
+            </div>
+
+            <h2 className="text-xl font-bold text-[var(--foreground)]">Subscription Plan</h2>
+            <p className="mt-1 text-sm text-black/50 leading-relaxed">
+              Unlock unlimited syncs, AI-powered parsing, and personalized insights.
             </p>
-            <p className="mt-1 text-xs text-black/60">
-              Trial ends: {subscription?.trial_ends_at ? new Date(subscription.trial_ends_at).toLocaleDateString() : "-"}
-            </p>
+
+            <div className="mt-6 space-y-4 flex-1">
+               <div className="flex items-center justify-between py-2 border-b border-[var(--border)]/30">
+                  <span className="text-sm text-black/60 font-medium">Trial End Date</span>
+                  <span className="text-sm font-bold text-black/80">
+                    {subscription?.trial_ends_at ? new Date(subscription.trial_ends_at).toLocaleDateString() : "-"}
+                  </span>
+               </div>
+               <div className="flex items-center justify-between py-2 border-b border-[var(--border)]/30">
+                  <span className="text-sm text-black/60 font-medium">Monthly Cost</span>
+                  <span className="text-sm font-bold text-black/80">$12.00</span>
+               </div>
+            </div>
+
             <button
-              className="mt-4 rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold"
+              className="mt-8 w-full rounded-2xl bg-[var(--foreground)] py-3 text-sm font-bold text-white transition-all hover:bg-black active:scale-95 shadow-lg shadow-black/10"
               type="button"
             >
-              Upgrade to Pro
+              Upgrade to Professional
             </button>
           </article>
         </div>
 
-        <article className="mt-4 rounded-xl border border-[var(--border)] p-4">
-          <h2 className="text-lg font-semibold">Resume versions (links)</h2>
-          <ul className="mt-3 space-y-2 text-sm">
-            {resumeLinks.map((resume) => (
-              <li key={resume.label} className="rounded-lg bg-[var(--surface-alt)] px-3 py-2">
-                <span className="font-semibold">{resume.label}</span>
-                <span className="mx-2 text-black/50">-</span>
-                <a className="underline" href={resume.url} target="_blank" rel="noreferrer">
-                  {resume.url}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </article>
+        <ResumeManager initialResumes={resumeVersions ?? []} />
 
-        <article className="mt-4 rounded-xl border border-[var(--border)] p-4">
-          <h2 className="text-lg font-semibold">Sync history</h2>
-          {syncRuns && syncRuns.length > 0 ? (
-            <ul className="mt-3 space-y-2 text-sm">
-              {syncRuns.map((run) => (
-                <li key={run.id} className="rounded-lg bg-[var(--surface-alt)] px-3 py-2">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="font-semibold capitalize">{run.status}</span>
-                    <span className="text-black/55">-</span>
-                    <span className="text-black/70">
-                      {run.ended_at ? new Date(run.ended_at).toLocaleString() : new Date(run.started_at).toLocaleString()}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-black/65">
-                    Fetched {run.fetched_count} | Created {run.created_count} | Updated {run.updated_count} | Failed {run.failed_count}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-2 text-sm text-black/65">No sync runs yet. Connect Gmail and run your first sync.</p>
-          )}
-        </article>
+        {/* History & Queue */}
+        <div className="mt-8 grid gap-8 lg:grid-cols-3">
+           <article className="lg:col-span-1 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+             <h2 className="text-lg font-bold mb-6 flex items-center gap-2">
+               <svg className="h-5 w-5 text-black/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+               </svg>
+               Sync History
+             </h2>
+             {syncRuns && syncRuns.length > 0 ? (
+               <div className="space-y-4">
+                 {syncRuns.map((run) => (
+                   <div key={run.id} className="rounded-2xl border border-[var(--border)]/40 bg-[var(--surface-alt)]/20 p-4">
+                     <div className="flex items-center justify-between mb-2">
+                        <SyncStatusBadge status={run.status} />
+                        <span className="text-[10px] font-bold text-black/30">
+                          {run.ended_at ? new Date(run.ended_at).toLocaleDateString() : new Date(run.started_at).toLocaleDateString()}
+                        </span>
+                     </div>
+                     <p className="text-[10px] font-mono font-bold text-black/50 leading-relaxed">
+                       Fetched: {run.fetched_count} | +{run.created_count} | -{run.failed_count}
+                     </p>
+                   </div>
+                 ))}
+               </div>
+             ) : (
+               <div className="py-12 text-center text-black/30 italic text-sm">No sync history yet.</div>
+             )}
+           </article>
 
-        <SettingsReviewQueuePanel />
+           <div className="lg:col-span-2">
+             <SettingsReviewQueuePanel />
+           </div>
+        </div>
       </section>
     </main>
   );

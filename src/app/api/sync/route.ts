@@ -315,6 +315,18 @@ export async function POST(request: Request) {
         continue;
       }
 
+      // Check if this email is in the exclusions list
+      const { data: isExcluded } = await supabase
+        .from("sync_exclusions")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("source_email_id", messageRef.id)
+        .maybeSingle();
+
+      if (isExcluded) {
+        continue;
+      }
+
       fetchedCount += 1;
 
       const messageResponse = await gmail.users.messages.get({

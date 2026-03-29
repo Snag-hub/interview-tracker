@@ -16,6 +16,8 @@ function mapApplication(row: Record<string, unknown>) {
     appliedDate: row.applied_date,
     jobPostingUrl: row.job_posting_url,
     jdUrl: row.jd_url,
+    platform: row.platform,
+    resumeVersionId: row.resume_version_id,
     notes: row.notes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -82,9 +84,13 @@ export async function PATCH(request: NextRequest, context: Params) {
     }
     if (payload.currentStage !== undefined) updates.current_stage = payload.currentStage;
     if (payload.appliedDate !== undefined) updates.applied_date = payload.appliedDate;
-    if (payload.jobPostingUrl !== undefined) updates.job_posting_url = payload.jobPostingUrl;
-    if (payload.jdUrl !== undefined) updates.jd_url = payload.jdUrl;
-    if (payload.notes !== undefined) updates.notes = payload.notes;
+    
+    // Convert empty strings to null for optional URL/ID fields
+    if (payload.jobPostingUrl !== undefined) updates.job_posting_url = payload.jobPostingUrl || null;
+    if (payload.jdUrl !== undefined) updates.jd_url = payload.jdUrl || null;
+    if (payload.platform !== undefined) updates.platform = payload.platform || null;
+    if (payload.resumeVersionId !== undefined) updates.resume_version_id = payload.resumeVersionId || null;
+    if (payload.notes !== undefined) updates.notes = payload.notes || null;
 
     const { data, error } = await supabase
       .from("job_applications")
@@ -125,6 +131,31 @@ export async function DELETE(_: NextRequest, context: Params) {
   const { id } = await context.params;
   const supabase = await createSupabaseServerClient();
 
+  // 1. Fetch associated rounds to get source_email_ids before deletion
+  const { data: rounds } = await supabase
+    .from("interview_rounds")
+    .select("source_email_id")
+    .eq("application_id", id)
+    .not("source_email_id", "is", null);
+
+  if (rounds && rounds.length > 0) {
+    const exclusionPayloads = rounds
+      .map((r) => ({
+        user_id: sessionUser.id,
+        source_email_id: r.source_email_id as string,
+      }))
+      .filter((val, index, self) => 
+        self.findIndex(t => t.source_email_id === val.source_email_id) === index
+      );
+
+    if (exclusionPayloads.length > 0) {
+      await supabase.from("sync_exclusions").upsert(exclusionPayloads, {
+        onConflict: "user_id,source_email_id",
+      });
+    }
+  }
+
+  // 2. Perform the deletion
   const { data, error } = await supabase
     .from("job_applications")
     .delete()

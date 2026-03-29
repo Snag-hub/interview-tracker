@@ -7,6 +7,7 @@ import {
 } from "@/components/dashboard-applications-table";
 import { DashboardAddInterviewForm } from "@/components/dashboard-add-interview-form";
 import { DashboardSyncButton } from "@/components/dashboard-sync-button";
+import { DashboardStats } from "@/components/dashboard-stats";
 
 type ApplicationRow = {
   id: string;
@@ -75,7 +76,7 @@ export default async function DashboardPage() {
   const [{ data: applications, error: applicationError }, roundsResult] = await Promise.all([
     supabase
       .from("job_applications")
-      .select("id, company, role, application_status, current_stage")
+      .select("id, company, role, application_status, current_stage, platform")
       .eq("user_id", user.id),
     supabase
       .from("interview_rounds")
@@ -110,13 +111,36 @@ export default async function DashboardPage() {
   }
 
   const grouped = new Map<string, DashboardApplicationRow>();
+  let offersCount = 0;
+  let upcomingInterviews = 0;
+  let interviewsThisWeek = 0;
+
+  const now = new Date();
+  const startOfWeek = new Date(now);
+  startOfWeek.setDate(now.getDate() - now.getDay());
+  const endOfWeek = new Date(startOfWeek);
+  endOfWeek.setDate(startOfWeek.getDate() + 7);
 
   for (const application of applications as ApplicationRow[]) {
+    if (application.application_status === "Offer") {
+      offersCount += 1;
+    }
+
     const companyKey = normalizeCompanyForGrouping(application.company);
     const roleKey = normalizeRoleForGrouping(application.role);
     const groupKey = `${companyKey}|${roleKey}`;
     const applicationRounds = roundsByApplication.get(application.id) ?? [];
     const latestRound = applicationRounds[0] ?? null;
+
+    for (const round of applicationRounds) {
+      const scheduledDate = new Date(round.scheduled_start_utc);
+      if (round.status === "Scheduled" && scheduledDate >= now) {
+        upcomingInterviews += 1;
+      }
+      if (scheduledDate >= startOfWeek && scheduledDate < endOfWeek) {
+        interviewsThisWeek += 1;
+      }
+    }
 
     const existing = grouped.get(groupKey);
     if (!existing) {
@@ -127,6 +151,7 @@ export default async function DashboardPage() {
         role: application.role,
         applicationStatus: application.application_status,
         currentStage: application.current_stage,
+        platform: (application as any).platform,
         latestRoundType: latestRound?.round_type ?? null,
         latestRoundStatus: latestRound?.status ?? null,
         latestRoundAt: latestRound?.scheduled_start_utc ?? null,
@@ -163,26 +188,44 @@ export default async function DashboardPage() {
 
   return (
     <main className="shell flex flex-1 justify-center px-6 py-10">
-      <section className="w-full max-w-5xl rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 md:p-8">
-        <header className="flex flex-wrap items-center justify-between gap-3">
+      <section className="w-full max-w-5xl">
+        <header className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <p className="font-mono text-xs uppercase tracking-[0.2em] text-[var(--accent)]">
               Dashboard
             </p>
-            <h1 className="mt-2 text-2xl font-semibold">Interview tracker overview</h1>
+            <h1 className="mt-2 text-3xl font-bold tracking-tight">Your interview roadmap</h1>
           </div>
           <DashboardSyncButton />
         </header>
 
+        <DashboardStats
+          totalApplications={grouped.size}
+          upcomingInterviews={upcomingInterviews}
+          interviewsThisWeek={interviewsThisWeek}
+          offersCount={offersCount}
+        />
+
         <DashboardAddInterviewForm />
 
-        {dashboardRows.length === 0 ? (
-          <p className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-5 text-sm text-black/70">
-            No applications yet. Run sync or add an application to get started.
-          </p>
-        ) : (
-          <DashboardApplicationsTable initialRows={dashboardRows} />
-        )}
+        <div className="mt-10">
+          <header className="flex items-center justify-between px-1">
+            <h2 className="text-xl font-semibold">Tracked applications</h2>
+            <p className="text-xs text-black/50">
+              Showing {dashboardRows.length} active group{dashboardRows.length === 1 ? "" : "s"}
+            </p>
+          </header>
+
+          {dashboardRows.length === 0 ? (
+            <div className="mt-6 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[var(--border)] bg-[var(--surface-alt)]/30 px-6 py-12 text-center">
+              <p className="max-w-xs text-sm text-black/60">
+                No applications found. Use the <strong>Sync now</strong> button to fetch from Gmail or add one manually.
+              </p>
+            </div>
+          ) : (
+            <DashboardApplicationsTable initialRows={dashboardRows} />
+          )}
+        </div>
       </section>
     </main>
   );

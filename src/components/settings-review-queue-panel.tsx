@@ -112,7 +112,7 @@ export function SettingsReviewQueuePanel() {
     setMessage(null);
 
     const confirmed = window.confirm(
-      "Apply correction to matching items by thread + signature + same company? This updates linked applications and marks matching review items as applied.",
+      "Apply correction to matching items? This updates linked applications and marks matching review items as applied.",
     );
     if (!confirmed) {
       setSubmittingId(null);
@@ -147,8 +147,9 @@ export function SettingsReviewQueuePanel() {
         applied: current.applied + (payload?.resolvedItems ?? 1),
       }));
       setMessage(
-        `Applied to ${payload?.resolvedItems ?? 1} review item(s) and ${payload?.updatedApplications ?? 0} application(s).`,
+        `Applied to ${payload?.resolvedItems ?? 1} item(s).`,
       );
+      window.setTimeout(() => setMessage(null), 3000);
     } catch (applyError) {
       setError(applyError instanceof Error ? applyError.message : "Failed to apply review item");
     } finally {
@@ -189,39 +190,52 @@ export function SettingsReviewQueuePanel() {
   };
 
   return (
-    <article className="mt-4 rounded-xl border border-[var(--border)] p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold">Needs Review</h2>
-        <div className="flex items-center gap-2 text-xs">
+    <article className="mt-8 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+      <header className="flex flex-wrap items-center justify-between gap-4 mb-8">
+        <div>
+           <h2 className="text-xl font-bold text-[var(--foreground)]">Review Queue</h2>
+           <p className="text-xs text-black/50">Verify AI extraction for ambiguous invites.</p>
+        </div>
+        <div className="flex items-center gap-1.5 p-1 rounded-full bg-[var(--surface-alt)]/30 border border-[var(--border)]/40">
           {(["pending", "applied", "dismissed"] as const).map((value) => (
             <button
               key={value}
               type="button"
-              className={`rounded-full border px-3 py-1 font-semibold ${
+              className={`rounded-full px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-all ${
                 status === value
-                  ? "border-[var(--accent)] bg-[var(--accent)] text-white"
-                  : "border-[var(--border)] bg-white text-black/75"
+                  ? "bg-[var(--accent)] text-white shadow-md shadow-[var(--accent)]/20"
+                  : "text-black/40 hover:text-black/60"
               }`}
               onClick={() => setStatus(value)}
             >
-              {value === "dismissed" ? "Audit" : value[0].toUpperCase() + value.slice(1)}
-              {value === "pending" ? ` (${counts.pending})` : null}
-              {value === "applied" ? ` (${counts.applied})` : null}
-              {value === "dismissed" ? ` (${counts.dismissed})` : null}
+              {value === "dismissed" ? "History" : value}
+              <span className="ml-1 opacity-50">{counts[value]}</span>
             </button>
           ))}
         </div>
-      </div>
+      </header>
 
-      {loading ? <p className="mt-3 text-sm text-black/70">Loading review queue...</p> : null}
-      {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
-      {message ? <p className="mt-3 text-sm text-emerald-700">{message}</p> : null}
+      {loading && (
+        <div className="flex items-center justify-center py-12">
+           <span className="h-5 w-5 animate-spin rounded-full border-2 border-black/10 border-t-[var(--accent)]" />
+        </div>
+      )}
+      
+      {error && <div className="mb-4 rounded-xl bg-rose-50 border border-rose-100 px-4 py-2 text-xs font-bold text-rose-700 italic">{error}</div>}
+      {message && <div className="mb-4 rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-2 text-xs font-bold text-emerald-700 italic">{message}</div>}
 
       {!loading && items.length === 0 ? (
-        <p className="mt-3 text-sm text-black/65">No review items in this filter.</p>
+        <div className="py-12 flex flex-col items-center justify-center text-center">
+           <div className="h-12 w-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-4 opacity-40">
+              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+           </div>
+           <p className="text-sm font-medium text-black/30">Review queue is empty.</p>
+        </div>
       ) : null}
 
-      <ul className="mt-3 space-y-3 text-sm">
+      <div className="space-y-4">
         {items.map((item) => {
           const isSubmitting = submittingId === item.id;
           const draft = drafts[item.id] ?? {
@@ -229,21 +243,37 @@ export function SettingsReviewQueuePanel() {
             role: item.resolved_role ?? item.proposed_role,
           };
 
-          return (
-            <li key={item.id} className="rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] p-3">
-              <p className="font-semibold">{item.raw_subject}</p>
-              <p className="mt-1 text-xs text-black/70">From: {item.raw_from ?? "-"}</p>
-              <p className="mt-1 text-xs text-black/70">
-                Source: {item.parser_source} | Confidence: {Number(item.confidence).toFixed(2)}
-                {item.reason ? ` | Reason: ${item.reason}` : ""}
-              </p>
-              {item.raw_snippet ? <p className="mt-2 text-xs text-black/70">{item.raw_snippet}</p> : null}
+          const confidence = Number(item.confidence);
+          const confidenceColor = confidence > 0.8 ? "text-emerald-600" : confidence > 0.5 ? "text-amber-600" : "text-rose-600";
 
-              <div className="mt-3 grid gap-2 md:grid-cols-2">
-                <label className="text-xs">
-                  <span className="mb-1 block text-black/70">Company</span>
+          return (
+            <article key={item.id} className="group rounded-2xl border border-[var(--border)]/60 bg-[var(--surface-alt)]/10 p-5 transition-all hover:bg-[var(--surface-alt)]/20">
+              <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--border)]/30 pb-4 mb-4">
+                 <div className="flex-1">
+                    <h3 className="text-sm font-bold text-black/80 line-clamp-1">{item.raw_subject}</h3>
+                    <p className="text-[10px] font-medium text-black/40 mt-1 truncate">From: {item.raw_from}</p>
+                 </div>
+                 <div className="text-right">
+                    <p className={`text-[10px] font-bold uppercase tracking-widest ${confidenceColor}`}>
+                      {Math.round(confidence * 100)}% Confidence
+                    </p>
+                    <p className="text-[9px] font-bold text-black/30 mt-0.5 uppercase tracking-wider">{item.parser_source} engine</p>
+                 </div>
+              </div>
+
+              {item.raw_snippet && (
+                <div className="mb-6">
+                   <p className="text-[11px] leading-relaxed text-black/60 italic line-clamp-2">
+                     "{item.raw_snippet}"
+                   </p>
+                </div>
+              )}
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1.5 block text-[9px] font-bold uppercase tracking-wider text-black/40">Resolved Company</span>
                   <input
-                    className="w-full rounded-md border border-[var(--border)] bg-white px-2 py-1 text-sm"
+                    className="w-full rounded-xl border border-[var(--border)] bg-white px-3 py-2 text-xs font-bold outline-none focus:border-[var(--accent)]"
                     value={draft.company}
                     disabled={status !== "pending"}
                     onChange={(event) =>
@@ -257,10 +287,10 @@ export function SettingsReviewQueuePanel() {
                     }
                   />
                 </label>
-                <label className="text-xs">
-                  <span className="mb-1 block text-black/70">Role</span>
+                <label className="block">
+                  <span className="mb-1.5 block text-[9px] font-bold uppercase tracking-wider text-black/40">Resolved Role</span>
                   <input
-                    className="w-full rounded-md border border-[var(--border)] bg-white px-2 py-1 text-sm"
+                    className="w-full rounded-xl border border-[var(--border)] bg-white px-3 py-2 text-xs font-bold outline-none focus:border-[var(--accent)]"
                     value={draft.role}
                     disabled={status !== "pending"}
                     onChange={(event) =>
@@ -276,20 +306,20 @@ export function SettingsReviewQueuePanel() {
                 </label>
               </div>
 
-              <div className="mt-3 flex flex-wrap items-center gap-2">
+              <div className="mt-6 flex flex-wrap items-center gap-3">
                 {status === "pending" ? (
                   <>
                     <button
                       type="button"
-                      className="rounded-full bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-white disabled:opacity-60"
+                      className="rounded-full bg-[var(--accent)] px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-white transition-all hover:bg-[var(--accent-strong)] disabled:opacity-60 shadow-lg shadow-[var(--accent)]/10"
                       disabled={isSubmitting}
                       onClick={() => applyItem(item)}
                     >
-                      {isSubmitting ? "Applying..." : "Apply (Thread + Signature)"}
+                      {isSubmitting ? "Applying..." : "Confirm Correction"}
                     </button>
                     <button
                       type="button"
-                      className="rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold"
+                      className="rounded-full border border-[var(--border)] bg-white px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-black/40 transition-all hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200"
                       disabled={isSubmitting}
                       onClick={() => dismissItem(item)}
                     >
@@ -298,19 +328,22 @@ export function SettingsReviewQueuePanel() {
                   </>
                 ) : null}
 
-                {item.application_id ? (
+                {item.application_id && (
                   <Link
                     href={`/applications/${item.application_id}`}
-                    className="rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold"
+                    className="ml-auto flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-black/30 hover:text-[var(--accent)] transition-all"
                   >
-                    Open Progress
+                    View Timeline
+                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
                   </Link>
-                ) : null}
+                )}
               </div>
-            </li>
+            </article>
           );
         })}
-      </ul>
+      </div>
     </article>
   );
 }

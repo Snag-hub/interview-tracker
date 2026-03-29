@@ -17,9 +17,9 @@ type SettingsSyncControlsProps = {
 };
 
 function getProgressMessage(elapsedSeconds: number): string {
-  if (elapsedSeconds < 3) return "Fetching interview emails...";
-  if (elapsedSeconds < 7) return "Parsing invites and extracting details...";
-  return "AI is verifying company and role names...";
+  if (elapsedSeconds < 3) return "Scanning Gmail inbox...";
+  if (elapsedSeconds < 7) return "Extracting invite metadata...";
+  return "Gemini AI is normalizing details...";
 }
 
 export function SettingsSyncControls({ hasGmailAccount }: SettingsSyncControlsProps) {
@@ -100,70 +100,108 @@ export function SettingsSyncControls({ hasGmailAccount }: SettingsSyncControlsPr
   };
 
   return (
-    <div className="mt-4">
-      <label className="mb-3 block text-sm">
-        <span className="mb-1 block text-black/70">Fetch emails from date</span>
-        <input
-          className="w-full max-w-xs rounded-md border border-[var(--border)] bg-white px-3 py-2"
-          type="date"
-          value={fromDate}
-          onChange={(event) => {
-            const nextValue = event.target.value;
-            setFromDate(nextValue);
-            if (typeof window !== "undefined") {
-              if (nextValue) {
-                window.localStorage.setItem(storageKey, nextValue);
-              } else {
-                window.localStorage.removeItem(storageKey);
-              }
-            }
-          }}
-        />
-        <span className="mt-1 block text-xs text-black/60">
-          Saved locally. Sync fetches emails from this date onward.
-        </span>
-      </label>
+    <div className="mt-8 space-y-6">
+      <div className="flex flex-col gap-1.5">
+         <span className="text-[10px] font-bold uppercase tracking-wider text-black/40">Sync History Threshold</span>
+         <div className="flex flex-wrap items-center gap-4">
+            <input
+              className="rounded-xl border border-[var(--border)] bg-white px-4 py-2 text-sm font-bold outline-none focus:border-[var(--accent)]"
+              type="date"
+              value={fromDate}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                setFromDate(nextValue);
+                if (typeof window !== "undefined") {
+                  if (nextValue) {
+                    window.localStorage.setItem(storageKey, nextValue);
+                  } else {
+                    window.localStorage.removeItem(storageKey);
+                  }
+                }
+              }}
+            />
+            <p className="text-[11px] text-black/50 leading-relaxed max-w-xs font-medium">
+               Sync will only scan emails received after this date. 
+               <span className="block italic opacity-70 mt-0.5">Note: Manual overrides take precedence.</span>
+            </p>
+         </div>
+      </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-3">
         <button
-          className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold disabled:opacity-60"
+          className="group flex items-center gap-2 rounded-full bg-[var(--accent)] px-6 py-2.5 text-[11px] font-bold uppercase tracking-widest text-white shadow-lg shadow-[var(--accent)]/10 transition-all hover:bg-[var(--accent-strong)] disabled:opacity-60 active:scale-95"
           type="button"
           disabled={isSyncing || !hasGmailAccount}
           onClick={() => runSync(false)}
         >
-          Sync now
+          <svg className={`h-3.5 w-3.5 ${isSyncing ? "animate-spin" : "group-hover:rotate-180 transition-transform duration-500"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          {isSyncing ? "Running..." : "Run Incremental Sync"}
         </button>
         <button
-          className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold disabled:opacity-60"
+          className="rounded-full border border-[var(--border)] bg-white px-6 py-2.5 text-[11px] font-bold uppercase tracking-widest text-black/50 transition-all hover:bg-slate-50 disabled:opacity-60 active:scale-95"
           type="button"
           disabled={isSyncing || !hasGmailAccount}
           onClick={() => runSync(true)}
         >
-          Full sync
+          Full historical sync
         </button>
       </div>
 
-      {isSyncing ? (
-        <div className="mt-3 flex items-center gap-2 text-sm text-black/75">
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/30 border-t-[var(--accent)]" />
-          <span>
-            {progressMessage} ({elapsedSeconds}s)
-          </span>
+      {isSyncing && (
+        <div className="flex items-center gap-3 rounded-2xl bg-[var(--surface-alt)]/20 border border-[var(--border)]/30 px-4 py-3">
+          <span className="flex h-5 w-5 animate-spin rounded-full border-2 border-black/10 border-t-[var(--accent)]" />
+          <div className="flex flex-col">
+            <span className="text-[11px] font-bold text-black/80">{progressMessage}</span>
+            <span className="text-[9px] font-bold text-black/30 uppercase tracking-widest mt-0.5">Elapsed: {elapsedSeconds}s</span>
+          </div>
         </div>
-      ) : null}
+      )}
 
-      {syncResult ? (
-        <p className="mt-3 text-sm text-black/75">
-          Sync {syncResult.status}. Fetched {syncResult.fetchedCount} | Parsed {syncResult.parsedCount} | Created {syncResult.createdCount} | Updated {syncResult.updatedCount} | Failed {syncResult.failedCount} | AI calls {syncResult.aiCallsUsed}
-        </p>
-      ) : null}
+      {syncResult && (
+        <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4">
+           <p className="text-[11px] font-bold text-emerald-800 uppercase tracking-widest mb-3 flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Sync {syncResult.status}
+           </p>
+           <div className="grid grid-cols-2 sm:grid-cols-4 gap-y-4 gap-x-6">
+              {[
+                { label: "Fetched", value: syncResult.fetchedCount },
+                { label: "Created", value: syncResult.createdCount },
+                { label: "Updated", value: syncResult.updatedCount },
+                { label: "Failed", value: syncResult.failedCount },
+              ].map((stat) => (
+                <div key={stat.label}>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-black/30 mb-0.5">{stat.label}</p>
+                  <p className="text-sm font-bold text-black/70">{stat.value}</p>
+                </div>
+              ))}
+           </div>
+           <p className="mt-4 pt-3 border-t border-emerald-100 text-[10px] font-bold text-emerald-700/60 uppercase tracking-wider">
+              Gemini AI processed {syncResult.parsedCount} invites using {syncResult.aiCallsUsed} requests.
+           </p>
+        </div>
+      )}
 
-      {syncError ? <p className="mt-3 text-sm text-red-700">{syncError}</p> : null}
-      {reconnectRequired ? (
-        <p className="mt-2 text-sm text-amber-700">
-          Gmail needs reconnection. Use <a className="underline" href="/api/gmail/connect">Reconnect Gmail</a> and retry sync.
-        </p>
-      ) : null}
+      {syncError && (
+        <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3">
+          <p className="text-xs font-bold text-rose-700 italic flex items-center gap-2">
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Error: {syncError}
+          </p>
+        </div>
+      )}
+
+      {reconnectRequired && (
+        <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3">
+           <p className="text-xs font-bold text-amber-800 flex items-center gap-2">
+            Gmail needs reconnection. <a className="underline hover:text-amber-950" href="/api/gmail/connect">Re-authorize here</a>.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

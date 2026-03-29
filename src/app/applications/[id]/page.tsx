@@ -24,7 +24,7 @@ export default async function ApplicationProgressPage({ params, searchParams }: 
 
   const { data: applicationData, error: applicationError } = await supabase
     .from("job_applications")
-    .select("id, company, role, application_status, current_stage, notes")
+    .select("id, company, role, application_status, current_stage, notes, jd_url, platform, resume_version_id")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -36,6 +36,12 @@ export default async function ApplicationProgressPage({ params, searchParams }: 
   if (!applicationData) {
     notFound();
   }
+
+  const { data: resumeVersions } = await supabase
+    .from("resume_versions")
+    .select("id, version_label")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
 
   const relatedIds = (query.related ?? "")
     .split(",")
@@ -65,6 +71,9 @@ export default async function ApplicationProgressPage({ params, searchParams }: 
     .in("application_id", applicationIdsToQuery)
     .order("scheduled_start_utc", { ascending: true });
 
+  let application: ApplicationProgress;
+  let rounds: ProgressRound[];
+
   if (roundsResult.error?.message?.includes("organizer_email") || roundsResult.error?.message?.includes("attendee_emails")) {
     const fallbackRounds = await supabase
       .from("interview_rounds")
@@ -76,16 +85,19 @@ export default async function ApplicationProgressPage({ params, searchParams }: 
       throw new Error(fallbackRounds.error.message);
     }
 
-    const application: ApplicationProgress = {
+    application = {
       id: applicationData.id,
       company: applicationData.company,
       role: applicationData.role,
       applicationStatus: applicationData.application_status,
       currentStage: applicationData.current_stage,
       notes: applicationData.notes,
+      jdUrl: applicationData.jd_url,
+      platform: applicationData.platform,
+      resumeVersionId: applicationData.resume_version_id,
     };
 
-    const rounds: ProgressRound[] = (fallbackRounds.data ?? []).map((row) => ({
+    rounds = (fallbackRounds.data ?? []).map((row) => ({
       id: row.id,
       roundType: row.round_type,
       status: row.status,
@@ -97,35 +109,47 @@ export default async function ApplicationProgressPage({ params, searchParams }: 
       attendeeEmails: [],
       notes: row.notes,
     }));
+  } else {
+    if (roundsResult.error) {
+      throw new Error(roundsResult.error.message);
+    }
 
-    return <ApplicationProgressPanel application={application} applicationIds={applicationIdsToQuery} rounds={rounds} />;
+    application = {
+      id: applicationData.id,
+      company: applicationData.company,
+      role: applicationData.role,
+      applicationStatus: applicationData.application_status,
+      currentStage: applicationData.current_stage,
+      notes: applicationData.notes,
+      jdUrl: applicationData.jd_url,
+      platform: applicationData.platform,
+      resumeVersionId: applicationData.resume_version_id,
+    };
+
+    rounds = (roundsResult.data ?? []).map((row) => ({
+      id: row.id,
+      roundType: row.round_type,
+      status: row.status,
+      scheduledStartUtc: row.scheduled_start_utc,
+      scheduledEndUtc: row.scheduled_end_utc,
+      timezone: row.timezone,
+      meetingLink: row.meeting_link,
+      organizerEmail: row.organizer_email,
+      attendeeEmails: row.attendee_emails ?? [],
+      notes: row.notes,
+    }));
   }
 
-  if (roundsResult.error) {
-    throw new Error(roundsResult.error.message);
-  }
-
-  const application: ApplicationProgress = {
-    id: applicationData.id,
-    company: applicationData.company,
-    role: applicationData.role,
-    applicationStatus: applicationData.application_status,
-    currentStage: applicationData.current_stage,
-    notes: applicationData.notes,
-  };
-
-  const rounds: ProgressRound[] = (roundsResult.data ?? []).map((row) => ({
-    id: row.id,
-    roundType: row.round_type,
-    status: row.status,
-    scheduledStartUtc: row.scheduled_start_utc,
-    scheduledEndUtc: row.scheduled_end_utc,
-    timezone: row.timezone,
-    meetingLink: row.meeting_link,
-    organizerEmail: row.organizer_email,
-    attendeeEmails: row.attendee_emails ?? [],
-    notes: row.notes,
-  }));
-
-  return <ApplicationProgressPanel application={application} applicationIds={applicationIdsToQuery} rounds={rounds} />;
+  return (
+    <main className="shell flex flex-1 justify-center px-6 py-10">
+      <section className="w-full max-w-5xl">
+        <ApplicationProgressPanel 
+          application={application} 
+          applicationIds={applicationIdsToQuery} 
+          rounds={rounds} 
+          resumeVersions={resumeVersions ?? []}
+        />
+      </section>
+    </main>
+  );
 }

@@ -7,9 +7,11 @@ export const createApplicationSchema = z.object({
   applicationStatus: z.enum(applicationStatuses).optional(),
   currentStage: z.enum(stageTypes).optional(),
   appliedDate: z.string().date().optional(),
-  jobPostingUrl: z.string().url().optional(),
-  jdUrl: z.string().url().optional(),
-  notes: z.string().max(2000).optional(),
+  jobPostingUrl: z.union([z.string().url(), z.literal(""), z.null()]).optional(),
+  jdUrl: z.union([z.string().url(), z.literal(""), z.null()]).optional(),
+  platform: z.string().trim().max(100).optional().nullable(),
+  resumeVersionId: z.union([z.string().uuid(), z.literal(""), z.null()]).optional(),
+  notes: z.string().max(2000).optional().nullable(),
 });
 
 export const updateApplicationSchema = createApplicationSchema.partial();
