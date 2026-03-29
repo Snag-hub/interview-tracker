@@ -371,8 +371,8 @@ export function ApplicationProgressPanel({
                               setRoundDrafts((current) => ({
                                 ...current,
                                 [round.id]: {
+                                  ...current[round.id],
                                   status: event.target.value,
-                                  notes: current[round.id]?.notes ?? round.notes ?? "",
                                 },
                               }))
                             }
@@ -458,7 +458,7 @@ export function ApplicationProgressPanel({
                               setRoundDrafts((current) => ({
                                 ...current,
                                 [round.id]: {
-                                  status: current[round.id]?.status ?? round.status,
+                                  ...current[round.id],
                                   notes: event.target.value,
                                 },
                               }))
