@@ -72,12 +72,14 @@ export default async function RootLayout({
                      <span className="text-[10px] font-bold uppercase tracking-wider text-black/30">Candidate</span>
                      <span className="text-xs font-bold text-black/60 truncate max-w-[150px]">{user.email}</span>
                   </div>
-                  <Link 
-                    className="rounded-full bg-slate-100 px-5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 transition-all border border-slate-200" 
-                    href="/auth/sign-out"
-                  >
-                    Sign out
-                  </Link>
+                  <form action="/auth/sign-out" method="post">
+                    <button
+                      className="rounded-full bg-slate-100 px-5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 transition-all border border-slate-200"
+                      type="submit"
+                    >
+                      Sign out
+                    </button>
+                  </form>
                 </>
               ) : (
                 <>

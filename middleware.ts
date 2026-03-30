@@ -9,6 +9,7 @@ const protectedApiPrefixes = [
   "/api/gmail",
   "/api/sync",
 ];
+const authPassthroughPaths = ["/auth/callback", "/auth/sign-out"];
 
 function isProtectedPage(pathname: string) {
   return protectedPagePrefixes.some(
@@ -22,11 +23,17 @@ function isProtectedApi(pathname: string) {
   );
 }
 
+function isAuthPassthroughPath(pathname: string) {
+  return authPassthroughPaths.some(
+    (path) => pathname === path || pathname.startsWith(`${path}/`),
+  );
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const { response, user } = await refreshSupabaseSession(request);
 
-  if (pathname.startsWith("/auth") && user) {
+  if (pathname.startsWith("/auth") && user && !isAuthPassthroughPath(pathname)) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
